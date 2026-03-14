@@ -1,0 +1,46 @@
+name: syncache
+repository: https://github.com/Hamdal/syncache
+
+packages:
+  - packages/**
+
+command:
+  bootstrap:
+    usePubspecOverrides: true
+
+scripts:
+  analyze:
+    run: dart analyze .
+    exec:
+      concurrency: 1
+    packageFilters:
+      dirExists: lib
+    description: Run static analysis on all packages
+
+  format:
+    run: dart format .
+    exec:
+      concurrency: 1
+    description: Format all packages
+
+  format:check:
+    run: dart format --set-exit-if-changed .
+    exec:
+      concurrency: 1
+    description: Check formatting on all packages
+
+  test:
+    run: dart test
+    exec:
+      concurrency: 1
+    packageFilters:
+      dirExists: test
+    description: Run tests for all packages
+
+  test:coverage:
+    run: dart test --coverage=coverage
+    exec:
+      concurrency: 1
+    packageFilters:
+      dirExists: test
+    description: Run tests with coverage for all packages

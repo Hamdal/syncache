@@ -1,0 +1,33 @@
+# Dart/Flutter
+.dart_tool/
+.packages
+build/
+pubspec.lock
+
+# Coverage
+coverage/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Android
+**/android/local.properties
+**/android/key.properties
+**/*.keystore
+**/*.jks
+
+# iOS
+**/ios/Pods/
+**/ios/.symlinks/
+**/ios/Flutter/Flutter.framework
+**/ios/Flutter/Flutter.podspec
+
+# Environment
+.env*
+*.env
+
+# OS
+.DS_Store
+Thumbs.db

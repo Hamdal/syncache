@@ -1,0 +1,4 @@
+# melos_managed_dependency_overrides: syncache
+dependency_overrides:
+  syncache:
+    path: ..
