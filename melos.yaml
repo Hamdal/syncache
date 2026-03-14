@@ -35,7 +35,21 @@ scripts:
       concurrency: 1
     packageFilters:
       dirExists: test
-    description: Run tests for all packages
+      flutter: false
+    description: Run tests for Dart packages
+
+  test:flutter:
+    run: flutter test
+    exec:
+      concurrency: 1
+    packageFilters:
+      dirExists: test
+      flutter: true
+    description: Run tests for Flutter packages
+
+  test:all:
+    run: melos run test && melos run test:flutter
+    description: Run tests for all packages (Dart and Flutter)
 
   test:coverage:
     run: dart test --coverage=coverage
@@ -43,4 +57,14 @@ scripts:
       concurrency: 1
     packageFilters:
       dirExists: test
-    description: Run tests with coverage for all packages
+      flutter: false
+    description: Run tests with coverage for Dart packages
+
+  test:flutter:coverage:
+    run: flutter test --coverage
+    exec:
+      concurrency: 1
+    packageFilters:
+      dirExists: test
+      flutter: true
+    description: Run tests with coverage for Flutter packages

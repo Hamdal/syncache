@@ -1,0 +1,6 @@
+# melos_managed_dependency_overrides: syncache,syncache_flutter
+dependency_overrides:
+  syncache:
+    path: ../../syncache
+  syncache_flutter:
+    path: ..
