@@ -1,0 +1,27 @@
+name: syncache_flutter
+description: Flutter integration for Syncache - lifecycle management, widgets, and connectivity detection.
+version: 0.1.0
+repository: https://github.com/Hamdal/syncache
+homepage: https://github.com/Hamdal/syncache
+issue_tracker: https://github.com/Hamdal/syncache/issues
+topics:
+  - cache
+  - offline-first
+  - flutter
+  - state-management
+
+environment:
+  sdk: ^3.0.0
+  flutter: ">=3.10.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  syncache: ^0.1.0
+  connectivity_plus: ^7.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+  mocktail: ^1.0.0
