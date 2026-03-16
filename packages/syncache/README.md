@@ -270,6 +270,15 @@ final cache = Syncache<User>(
 );
 ```
 
+## Related Packages
+
+Looking for additional functionality? Check out these companion packages:
+
+| Package | Description |
+|---------|-------------|
+| [syncache_flutter](https://pub.dev/packages/syncache_flutter) | Flutter integration with widgets (`CacheBuilder`, `CacheConsumer`), lifecycle management, and connectivity detection via `FlutterNetwork` |
+| [syncache_hive](https://pub.dev/packages/syncache_hive) | Persistent storage backend using Hive for cross-platform caching (iOS, Android, Web, Desktop) |
+
 ## License
 
 MIT License. See [LICENSE](LICENSE) for details.
