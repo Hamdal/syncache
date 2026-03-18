@@ -1,3 +1,7 @@
+## 0.1.1
+
+- Add `Policy.cacheAndRefresh` - returns cached data immediately and always refreshes in background (unlike `staleWhileRefresh` which only refreshes when expired)
+
 ## 0.1.0
 
 - Initial release

@@ -1,6 +1,6 @@
 name: syncache
 description: An offline-first cache and sync engine for Dart with optimistic mutations, reactive streams, and pluggable storage.
-version: 0.1.0
+version: 0.1.1
 repository: https://github.com/Hamdal/syncache
 homepage: https://github.com/Hamdal/syncache
 issue_tracker: https://github.com/Hamdal/syncache/issues
