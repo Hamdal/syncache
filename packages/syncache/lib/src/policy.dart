@@ -55,4 +55,18 @@ enum Policy {
   /// 3. If no cache exists and online, fetch and return
   /// 4. If no cache and offline, throw [CacheMissException]
   staleWhileRefresh,
+
+  /// Returns cached data if available; always refreshes in background.
+  ///
+  /// Similar to [staleWhileRefresh] but triggers a background refresh even
+  /// if the cache is still valid. This ensures that subscribers always
+  /// receive the most up-to-date data while still benefiting from fast
+  /// cache access.
+  ///
+  /// Behavior:
+  /// 1. If cache exists, return it immediately
+  /// 2. Always trigger background refresh if online
+  /// 3. If no cache exists and online, fetch and return
+  /// 4. If no cache and offline, throw [CacheMissException]
+  cacheAndRefresh
 }

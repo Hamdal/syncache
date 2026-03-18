@@ -218,94 +218,15 @@ class Syncache<T> {
     _checkNotDisposed();
     cancel?.throwIfCancelled();
 
-    final effectiveRetry = retry ?? defaultRetry;
-
-    switch (policy) {
-      case Policy.cacheOnly:
-        final value = await _getFromCache(key);
-        _notify(key, isFromCache: true);
-        return value;
-
-      case Policy.networkOnly:
-        final value = await _fetchEngine.fetchAndStore(
-            key, fetch, ttl, effectiveRetry, cancel, tags);
-        _notify(key, isFromCache: false);
-        return value;
-
-      case Policy.refresh:
-        if (network.isOnline) {
-          final value = await _fetchEngine.fetchAndStore(
-              key, fetch, ttl, effectiveRetry, cancel, tags);
-          _notify(key, isFromCache: false);
-          return value;
-        }
-
-        final value = await _getFromCache(key);
-        _notify(key, isFromCache: true);
-        return value;
-
-      case Policy.offlineFirst:
-        final cached = await store.read(key);
-        if (cached != null && !cached.meta.isExpired) {
-          _notifyObservers((o) => o.onCacheHit(key));
-          _notify(key, isFromCache: true);
-          return cached.value;
-        }
-
-        _notifyObservers((o) => o.onCacheMiss(key));
-
-        if (network.isOnline) {
-          try {
-            final value = await _fetchEngine.fetchAndStore(
-                key, fetch, ttl, effectiveRetry, cancel, tags);
-            _notify(key, isFromCache: false);
-            return value;
-          } on CancelledException {
-            rethrow;
-          } catch (_) {
-            if (cached != null) {
-              _notify(key, isFromCache: true);
-              return cached.value;
-            }
-            rethrow;
-          }
-        }
-
-        if (cached != null) {
-          _notify(key, isFromCache: true);
-          return cached.value;
-        }
-
-        throw CacheMissException(key);
-
-      case Policy.staleWhileRefresh:
-        final cached = await store.read(key);
-        if (cached != null) {
-          _notifyObservers((o) => o.onCacheHit(key));
-          if (network.isOnline && cached.meta.isExpired) {
-            _fetchEngine
-                .fetchAndStore(key, fetch, ttl, effectiveRetry, null, tags)
-                .then((_) => _notify(key, isFromCache: false))
-                .catchError((Object e, StackTrace st) {
-              _notifyObservers((o) => o.onFetchError(key, e, st));
-            });
-          }
-
-          _notify(key, isFromCache: true);
-          return cached.value;
-        }
-
-        _notifyObservers((o) => o.onCacheMiss(key));
-
-        if (network.isOnline) {
-          final value = await _fetchEngine.fetchAndStore(
-              key, fetch, ttl, effectiveRetry, cancel, tags);
-          _notify(key, isFromCache: false);
-          return value;
-        }
-
-        throw CacheMissException(key);
-    }
+    return _executePolicy<T>(
+      key: key,
+      policy: policy,
+      strategy: _StandardFetchStrategy<T>(fetch),
+      ttl: ttl,
+      retry: retry ?? defaultRetry,
+      cancel: cancel,
+      tags: tags,
+    );
   }
 
   /// Retrieves a value with cache metadata.
@@ -343,149 +264,15 @@ class Syncache<T> {
     _checkNotDisposed();
     cancel?.throwIfCancelled();
 
-    final effectiveRetry = retry ?? defaultRetry;
-
-    switch (policy) {
-      case Policy.cacheOnly:
-        final cached = await store.read(key);
-        if (cached == null) {
-          throw CacheMissException(key);
-        }
-        return CacheResult(
-          value: cached.value,
-          meta: CacheResultMeta.fromCache(
-            isStale: cached.meta.isExpired,
-            storedAt: cached.meta.storedAt,
-            version: cached.meta.version,
-          ),
-        );
-
-      case Policy.networkOnly:
-        return _fetchAndStoreWithMeta(key, fetch, ttl, effectiveRetry, cancel);
-
-      case Policy.refresh:
-        if (network.isOnline) {
-          return _fetchAndStoreWithMeta(
-              key, fetch, ttl, effectiveRetry, cancel);
-        }
-        final cached = await store.read(key);
-        if (cached == null) {
-          throw CacheMissException(key);
-        }
-        return CacheResult(
-          value: cached.value,
-          meta: CacheResultMeta.fromCache(
-            isStale: cached.meta.isExpired,
-            storedAt: cached.meta.storedAt,
-            version: cached.meta.version,
-          ),
-        );
-
-      case Policy.offlineFirst:
-        final cached = await store.read(key);
-        if (cached != null && !cached.meta.isExpired) {
-          _notifyObservers((o) => o.onCacheHit(key));
-          return CacheResult(
-            value: cached.value,
-            meta: CacheResultMeta.fromCache(
-              isStale: false,
-              storedAt: cached.meta.storedAt,
-              version: cached.meta.version,
-            ),
-          );
-        }
-
-        _notifyObservers((o) => o.onCacheMiss(key));
-
-        if (network.isOnline) {
-          try {
-            return await _fetchAndStoreWithMeta(
-                key, fetch, ttl, effectiveRetry, cancel);
-          } on CancelledException {
-            rethrow;
-          } catch (_) {
-            if (cached != null) {
-              return CacheResult(
-                value: cached.value,
-                meta: CacheResultMeta.fromCache(
-                  isStale: cached.meta.isExpired,
-                  storedAt: cached.meta.storedAt,
-                  version: cached.meta.version,
-                ),
-              );
-            }
-            rethrow;
-          }
-        }
-
-        if (cached != null) {
-          return CacheResult(
-            value: cached.value,
-            meta: CacheResultMeta.fromCache(
-              isStale: cached.meta.isExpired,
-              storedAt: cached.meta.storedAt,
-              version: cached.meta.version,
-            ),
-          );
-        }
-
-        throw CacheMissException(key);
-
-      case Policy.staleWhileRefresh:
-        final cached = await store.read(key);
-        if (cached != null) {
-          _notifyObservers((o) => o.onCacheHit(key));
-          if (network.isOnline && cached.meta.isExpired) {
-            _fetchEngine
-                .fetchAndStore(key, fetch, ttl, effectiveRetry, null)
-                .then((_) => _notify(key, isFromCache: false))
-                .catchError((Object e, StackTrace st) {
-              _notifyObservers((o) => o.onFetchError(key, e, st));
-            });
-          }
-
-          return CacheResult(
-            value: cached.value,
-            meta: CacheResultMeta.fromCache(
-              isStale: cached.meta.isExpired,
-              storedAt: cached.meta.storedAt,
-              version: cached.meta.version,
-            ),
-          );
-        }
-
-        _notifyObservers((o) => o.onCacheMiss(key));
-
-        if (network.isOnline) {
-          return _fetchAndStoreWithMeta(
-              key, fetch, ttl, effectiveRetry, cancel);
-        }
-
-        throw CacheMissException(key);
-    }
-  }
-
-  /// Fetches and stores with metadata. Notifies regular [watch] streams
-  /// but not [_metaControllers] since [watchWithMeta] handles its own emission.
-  Future<CacheResult<T>> _fetchAndStoreWithMeta(
-    String key,
-    Fetcher<T> fetch,
-    Duration? ttl,
-    RetryConfig retry,
-    CancellationToken? cancel,
-  ) async {
-    final value =
-        await _fetchEngine.fetchAndStore(key, fetch, ttl, retry, cancel);
-    final cached = await store.read(key);
-
-    await _notifyValue(key);
-
-    return CacheResult(
-      value: value,
-      meta: CacheResultMeta.fresh(
-        version: cached?.meta.version ?? 1,
-        storedAt: cached?.meta.storedAt,
-      ),
+    return _executePolicy<CacheResult<T>>(
+      key: key,
+      policy: policy,
+      strategy: _MetaFetchStrategy<T>(fetch, store, _notifyValue),
+      ttl: ttl,
+      retry: retry ?? defaultRetry,
+      cancel: cancel,
+      tags: null,
+      skipNotify: true, // Meta strategy handles its own notifications
     );
   }
 
@@ -531,106 +318,15 @@ class Syncache<T> {
     _checkNotDisposed();
     cancel?.throwIfCancelled();
 
-    final effectiveRetry = retry ?? defaultRetry;
-
-    switch (policy) {
-      case Policy.cacheOnly:
-        final value = await _getFromCache(key);
-        _notify(key, isFromCache: true);
-        return value;
-
-      case Policy.networkOnly:
-        final value = await _fetchEngine.fetchAndStoreConditional(
-            key, fetch, ttl, effectiveRetry, cancel);
-        _notify(key, isFromCache: false);
-        return value;
-
-      case Policy.refresh:
-        if (network.isOnline) {
-          final value = await _fetchEngine.fetchAndStoreConditional(
-              key, fetch, ttl, effectiveRetry, cancel);
-          _notify(key, isFromCache: false);
-          return value;
-        }
-        final value = await _getFromCache(key);
-        _notify(key, isFromCache: true);
-        return value;
-
-      case Policy.offlineFirst:
-        final cached = await store.read(key);
-        if (cached != null && !cached.meta.isExpired) {
-          _notifyObservers((o) => o.onCacheHit(key));
-          _notify(key, isFromCache: true);
-          return cached.value;
-        }
-
-        _notifyObservers((o) => o.onCacheMiss(key));
-
-        if (network.isOnline) {
-          try {
-            final value = await _fetchEngine.fetchAndStoreConditional(
-              key,
-              fetch,
-              ttl,
-              effectiveRetry,
-              cancel,
-            );
-            _notify(key, isFromCache: false);
-            return value;
-          } on CancelledException {
-            rethrow;
-          } on CacheMissForConditionalException {
-            throw CacheMissException(key);
-          } catch (_) {
-            if (cached != null) {
-              _notify(key, isFromCache: true);
-              return cached.value;
-            }
-            rethrow;
-          }
-        }
-
-        if (cached != null) {
-          _notify(key, isFromCache: true);
-          return cached.value;
-        }
-        throw CacheMissException(key);
-
-      case Policy.staleWhileRefresh:
-        final cached = await store.read(key);
-        if (cached != null) {
-          _notifyObservers((o) => o.onCacheHit(key));
-          if (network.isOnline && cached.meta.isExpired) {
-            _fetchEngine
-                .fetchAndStoreConditional(key, fetch, ttl, effectiveRetry, null)
-                .then((_) => _notify(key, isFromCache: false))
-                .catchError((Object e, StackTrace st) {
-              _notifyObservers((o) => o.onFetchError(key, e, st));
-            });
-          }
-          _notify(key, isFromCache: true);
-          return cached.value;
-        }
-
-        _notifyObservers((o) => o.onCacheMiss(key));
-
-        if (network.isOnline) {
-          final value = await _fetchEngine.fetchAndStoreConditional(
-              key, fetch, ttl, effectiveRetry, cancel);
-          _notify(key, isFromCache: false);
-          return value;
-        }
-
-        throw CacheMissException(key);
-    }
-  }
-
-  Future<T> _getFromCache(String key) async {
-    final cached = await store.read(key);
-    if (cached == null) {
-      throw CacheMissException(key);
-    }
-    return cached.value;
+    return _executePolicy<T>(
+      key: key,
+      policy: policy,
+      strategy: _ConditionalFetchStrategy<T>(fetch),
+      ttl: ttl,
+      retry: retry ?? defaultRetry,
+      cancel: cancel,
+      tags: null,
+    );
   }
 
   /// Sets a value directly in the cache without fetching.
@@ -1699,6 +1395,191 @@ class Syncache<T> {
       _metaControllers.remove(key);
     }
   }
+
+  /// Executes caching logic based on the given [policy] using a [strategy].
+  ///
+  /// This unified method handles all policy variants,
+  /// delegating fetch/wrap operations to the strategy.
+  ///
+  /// When [skipNotify] is true, the method will not call [_notify] after
+  /// cache hits or fetches. This is used by [getWithMeta] since the meta
+  /// strategy handles value notifications internally via [_notifyValue],
+  /// and [watchWithMeta] handles meta notifications via manual emission.
+  Future<R> _executePolicy<R>({
+    required String key,
+    required Policy policy,
+    required _FetchStrategy<T, R> strategy,
+    required Duration? ttl,
+    required RetryConfig retry,
+    required CancellationToken? cancel,
+    required List<String>? tags,
+    bool skipNotify = false,
+  }) async {
+    switch (policy) {
+      case Policy.cacheOnly:
+        final cached = await store.read(key);
+        if (cached == null) {
+          throw CacheMissException(key);
+        }
+        if (!skipNotify) _notify(key, isFromCache: true);
+        return strategy.wrapCached(cached, isStale: cached.meta.isExpired);
+
+      case Policy.networkOnly:
+        final result = await strategy.fetchAndStore(
+          _fetchEngine,
+          key,
+          ttl,
+          retry,
+          cancel,
+          tags,
+        );
+        if (!skipNotify) _notify(key, isFromCache: false);
+        return result;
+
+      case Policy.refresh:
+        if (network.isOnline) {
+          final result = await strategy.fetchAndStore(
+            _fetchEngine,
+            key,
+            ttl,
+            retry,
+            cancel,
+            tags,
+          );
+          if (!skipNotify) _notify(key, isFromCache: false);
+          return result;
+        }
+        final cached = await store.read(key);
+        if (cached == null) {
+          throw CacheMissException(key);
+        }
+        if (!skipNotify) _notify(key, isFromCache: true);
+        return strategy.wrapCached(cached, isStale: cached.meta.isExpired);
+
+      case Policy.offlineFirst:
+        final cached = await store.read(key);
+        if (cached != null && !cached.meta.isExpired) {
+          _notifyObservers((o) => o.onCacheHit(key));
+          if (!skipNotify) _notify(key, isFromCache: true);
+          return strategy.wrapCached(cached, isStale: false);
+        }
+
+        _notifyObservers((o) => o.onCacheMiss(key));
+
+        if (network.isOnline) {
+          try {
+            final result = await strategy.fetchAndStore(
+              _fetchEngine,
+              key,
+              ttl,
+              retry,
+              cancel,
+              tags,
+            );
+            if (!skipNotify) _notify(key, isFromCache: false);
+            return result;
+          } on CancelledException {
+            rethrow;
+          } catch (e) {
+            if (strategy.isConvertibleToCacheMiss(e)) {
+              throw CacheMissException(key);
+            }
+            if (cached != null) {
+              if (!skipNotify) _notify(key, isFromCache: true);
+              return strategy.wrapCached(cached,
+                  isStale: cached.meta.isExpired);
+            }
+            rethrow;
+          }
+        }
+
+        if (cached != null) {
+          if (!skipNotify) _notify(key, isFromCache: true);
+          return strategy.wrapCached(cached, isStale: cached.meta.isExpired);
+        }
+
+        throw CacheMissException(key);
+
+      case Policy.staleWhileRefresh:
+        return _executeStaleWhileRefresh(
+          key: key,
+          strategy: strategy,
+          ttl: ttl,
+          retry: retry,
+          cancel: cancel,
+          tags: tags,
+          refreshOnlyIfExpired: true,
+          skipNotify: skipNotify,
+        );
+
+      case Policy.cacheAndRefresh:
+        return _executeStaleWhileRefresh(
+          key: key,
+          strategy: strategy,
+          ttl: ttl,
+          retry: retry,
+          cancel: cancel,
+          tags: tags,
+          refreshOnlyIfExpired: false,
+          skipNotify: skipNotify,
+        );
+    }
+  }
+
+  /// Shared logic for staleWhileRefresh and cacheAndRefresh policies.
+  ///
+  /// The only difference between these policies is [refreshOnlyIfExpired]:
+  /// - staleWhileRefresh: only refreshes if cache is expired
+  /// - cacheAndRefresh: always refreshes in background
+  Future<R> _executeStaleWhileRefresh<R>({
+    required String key,
+    required _FetchStrategy<T, R> strategy,
+    required Duration? ttl,
+    required RetryConfig retry,
+    required CancellationToken? cancel,
+    required List<String>? tags,
+    required bool refreshOnlyIfExpired,
+    bool skipNotify = false,
+  }) async {
+    final cached = await store.read(key);
+
+    if (cached != null) {
+      _notifyObservers((o) => o.onCacheHit(key));
+
+      final shouldRefresh =
+          network.isOnline && (!refreshOnlyIfExpired || cached.meta.isExpired);
+
+      if (shouldRefresh) {
+        strategy
+            .backgroundRefresh(_fetchEngine, key, ttl, retry, tags)
+            .then((_) {
+          _notify(key, isFromCache: false);
+        }).catchError((Object e, StackTrace st) {
+          _notifyObservers((o) => o.onFetchError(key, e, st));
+        });
+      }
+
+      if (!skipNotify) _notify(key, isFromCache: true);
+      return strategy.wrapCached(cached, isStale: cached.meta.isExpired);
+    }
+
+    _notifyObservers((o) => o.onCacheMiss(key));
+
+    if (network.isOnline) {
+      final result = await strategy.fetchAndStore(
+        _fetchEngine,
+        key,
+        ttl,
+        retry,
+        cancel,
+        tags,
+      );
+      if (!skipNotify) _notify(key, isFromCache: false);
+      return result;
+    }
+
+    throw CacheMissException(key);
+  }
 }
 
 /// Internal class to track dependency watcher information.
@@ -1725,4 +1606,161 @@ class _DependencyWatcher<T> {
     required this.ttl,
     required this.dependsOn,
   });
+}
+
+/// Strategy for fetching and wrapping cache results.
+abstract class _FetchStrategy<T, R> {
+  /// Fetches fresh data and stores it, returning the wrapped result.
+  Future<R> fetchAndStore(
+    FetchEngine<T> engine,
+    String key,
+    Duration? ttl,
+    RetryConfig retry,
+    CancellationToken? cancel,
+    List<String>? tags,
+  );
+
+  /// Wraps a cached value into the result type.
+  R wrapCached(Stored<T> cached, {required bool isStale});
+
+  /// Performs a background refresh (fire-and-forget).
+  /// Returns a Future that completes when the refresh is done.
+  Future<void> backgroundRefresh(
+    FetchEngine<T> engine,
+    String key,
+    Duration? ttl,
+    RetryConfig retry,
+    List<String>? tags,
+  );
+
+  /// Additional error types to catch and convert to CacheMissException.
+  /// Override in subclasses that need special error handling.
+  bool isConvertibleToCacheMiss(Object error) => false;
+}
+
+/// Standard fetch strategy that returns T directly.
+class _StandardFetchStrategy<T> extends _FetchStrategy<T, T> {
+  final Fetcher<T> fetch;
+
+  _StandardFetchStrategy(this.fetch);
+
+  @override
+  Future<T> fetchAndStore(
+    FetchEngine<T> engine,
+    String key,
+    Duration? ttl,
+    RetryConfig retry,
+    CancellationToken? cancel,
+    List<String>? tags,
+  ) {
+    return engine.fetchAndStore(key, fetch, ttl, retry, cancel, tags);
+  }
+
+  @override
+  T wrapCached(Stored<T> cached, {required bool isStale}) => cached.value;
+
+  @override
+  Future<void> backgroundRefresh(
+    FetchEngine<T> engine,
+    String key,
+    Duration? ttl,
+    RetryConfig retry,
+    List<String>? tags,
+  ) {
+    return engine.fetchAndStore(key, fetch, ttl, retry, null, tags);
+  }
+}
+
+/// Fetch strategy that returns CacheResult<T> with metadata.
+class _MetaFetchStrategy<T> extends _FetchStrategy<T, CacheResult<T>> {
+  final Fetcher<T> fetch;
+  final Store<T> store;
+  final Future<void> Function(String key) notifyValue;
+
+  _MetaFetchStrategy(this.fetch, this.store, this.notifyValue);
+
+  @override
+  Future<CacheResult<T>> fetchAndStore(
+    FetchEngine<T> engine,
+    String key,
+    Duration? ttl,
+    RetryConfig retry,
+    CancellationToken? cancel,
+    List<String>? tags,
+  ) async {
+    final value =
+        await engine.fetchAndStore(key, fetch, ttl, retry, cancel, tags);
+    final cached = await store.read(key);
+
+    await notifyValue(key);
+
+    return CacheResult(
+      value: value,
+      meta: CacheResultMeta.fresh(
+        version: cached?.meta.version ?? 1,
+        storedAt: cached?.meta.storedAt,
+      ),
+    );
+  }
+
+  @override
+  CacheResult<T> wrapCached(Stored<T> cached, {required bool isStale}) {
+    return CacheResult(
+      value: cached.value,
+      meta: CacheResultMeta.fromCache(
+        isStale: isStale,
+        storedAt: cached.meta.storedAt,
+        version: cached.meta.version,
+      ),
+    );
+  }
+
+  @override
+  Future<void> backgroundRefresh(
+    FetchEngine<T> engine,
+    String key,
+    Duration? ttl,
+    RetryConfig retry,
+    List<String>? tags,
+  ) {
+    return engine.fetchAndStore(key, fetch, ttl, retry, null, tags);
+  }
+}
+
+/// Conditional fetch strategy that supports HTTP 304.
+class _ConditionalFetchStrategy<T> extends _FetchStrategy<T, T> {
+  final ConditionalFetcher<T> fetch;
+
+  _ConditionalFetchStrategy(this.fetch);
+
+  @override
+  Future<T> fetchAndStore(
+    FetchEngine<T> engine,
+    String key,
+    Duration? ttl,
+    RetryConfig retry,
+    CancellationToken? cancel,
+    List<String>? tags,
+  ) {
+    return engine.fetchAndStoreConditional(
+        key, fetch, ttl, retry, cancel, tags);
+  }
+
+  @override
+  T wrapCached(Stored<T> cached, {required bool isStale}) => cached.value;
+
+  @override
+  Future<void> backgroundRefresh(
+    FetchEngine<T> engine,
+    String key,
+    Duration? ttl,
+    RetryConfig retry,
+    List<String>? tags,
+  ) {
+    return engine.fetchAndStoreConditional(key, fetch, ttl, retry, null, tags);
+  }
+
+  @override
+  bool isConvertibleToCacheMiss(Object error) =>
+      error is CacheMissForConditionalException;
 }
