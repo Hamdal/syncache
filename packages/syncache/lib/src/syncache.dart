@@ -1398,7 +1398,7 @@ class Syncache<T> {
   /// Executes caching logic based on the given [policy] using a [strategy].
   ///
   /// This unified method handles all policy variants,
-  /// delegating fetch/wrap operations to the strategy. 
+  /// delegating fetch/wrap operations to the strategy.
   Future<R> _executePolicy<R>({
     required String key,
     required Policy policy,
