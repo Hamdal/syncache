@@ -305,6 +305,34 @@ class Syncache<T> {
         }
 
         throw CacheMissException(key);
+
+      case Policy.cacheAndRefresh:
+        final cached = await store.read(key);
+        if (cached != null) {
+          _notifyObservers((o) => o.onCacheHit(key));
+          if (network.isOnline) {
+            _fetchEngine
+                .fetchAndStore(key, fetch, ttl, effectiveRetry, null, tags)
+                .then((_) => _notify(key, isFromCache: false))
+                .catchError((Object e, StackTrace st) {
+              _notifyObservers((o) => o.onFetchError(key, e, st));
+            });
+          }
+
+          _notify(key, isFromCache: true);
+          return cached.value;
+        }
+
+        _notifyObservers((o) => o.onCacheMiss(key));
+
+        if (network.isOnline) {
+          final value = await _fetchEngine.fetchAndStore(
+              key, fetch, ttl, effectiveRetry, cancel, tags);
+          _notify(key, isFromCache: false);
+          return value;
+        }
+
+        throw CacheMissException(key);
     }
   }
 
@@ -462,6 +490,37 @@ class Syncache<T> {
         }
 
         throw CacheMissException(key);
+
+      case Policy.cacheAndRefresh:
+        final cached = await store.read(key);
+        if (cached != null) {
+          _notifyObservers((o) => o.onCacheHit(key));
+          if (network.isOnline) {
+            _fetchEngine
+                .fetchAndStore(key, fetch, ttl, effectiveRetry, null)
+                .then((_) => _notify(key, isFromCache: false))
+                .catchError((Object e, StackTrace st) {
+              _notifyObservers((o) => o.onFetchError(key, e, st));
+            });
+          }
+
+          return CacheResult(
+            value: cached.value,
+            meta: CacheResultMeta.fromCache(
+              isStale: cached.meta.isExpired,
+              storedAt: cached.meta.storedAt,
+              version: cached.meta.version,
+            ),
+          );
+        }
+
+        _notifyObservers((o) => o.onCacheMiss(key));
+
+        if (network.isOnline) {
+          return _fetchAndStoreWithMeta(key, fetch, ttl, effectiveRetry, cancel);
+        }
+
+        throw CacheMissException(key);
     }
   }
 
@@ -601,6 +660,33 @@ class Syncache<T> {
         if (cached != null) {
           _notifyObservers((o) => o.onCacheHit(key));
           if (network.isOnline && cached.meta.isExpired) {
+            _fetchEngine
+                .fetchAndStoreConditional(key, fetch, ttl, effectiveRetry, null)
+                .then((_) => _notify(key, isFromCache: false))
+                .catchError((Object e, StackTrace st) {
+              _notifyObservers((o) => o.onFetchError(key, e, st));
+            });
+          }
+          _notify(key, isFromCache: true);
+          return cached.value;
+        }
+
+        _notifyObservers((o) => o.onCacheMiss(key));
+
+        if (network.isOnline) {
+          final value = await _fetchEngine.fetchAndStoreConditional(
+              key, fetch, ttl, effectiveRetry, cancel);
+          _notify(key, isFromCache: false);
+          return value;
+        }
+
+        throw CacheMissException(key);
+
+      case Policy.cacheAndRefresh:
+        final cached = await store.read(key);
+        if (cached != null) {
+          _notifyObservers((o) => o.onCacheHit(key));
+          if (network.isOnline) {
             _fetchEngine
                 .fetchAndStoreConditional(key, fetch, ttl, effectiveRetry, null)
                 .then((_) => _notify(key, isFromCache: false))
