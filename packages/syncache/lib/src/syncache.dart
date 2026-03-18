@@ -272,6 +272,7 @@ class Syncache<T> {
       retry: retry ?? defaultRetry,
       cancel: cancel,
       tags: null,
+      skipNotify: true, // Meta strategy handles its own notifications
     );
   }
 
@@ -1399,6 +1400,11 @@ class Syncache<T> {
   ///
   /// This unified method handles all policy variants,
   /// delegating fetch/wrap operations to the strategy.
+  ///
+  /// When [skipNotify] is true, the method will not call [_notify] after
+  /// cache hits or fetches. This is used by [getWithMeta] since the meta
+  /// strategy handles value notifications internally via [_notifyValue],
+  /// and [watchWithMeta] handles meta notifications via manual emission.
   Future<R> _executePolicy<R>({
     required String key,
     required Policy policy,
@@ -1407,6 +1413,7 @@ class Syncache<T> {
     required RetryConfig retry,
     required CancellationToken? cancel,
     required List<String>? tags,
+    bool skipNotify = false,
   }) async {
     switch (policy) {
       case Policy.cacheOnly:
@@ -1414,7 +1421,7 @@ class Syncache<T> {
         if (cached == null) {
           throw CacheMissException(key);
         }
-        _notify(key, isFromCache: true);
+        if (!skipNotify) _notify(key, isFromCache: true);
         return strategy.wrapCached(cached, isStale: cached.meta.isExpired);
 
       case Policy.networkOnly:
@@ -1426,7 +1433,7 @@ class Syncache<T> {
           cancel,
           tags,
         );
-        _notify(key, isFromCache: false);
+        if (!skipNotify) _notify(key, isFromCache: false);
         return result;
 
       case Policy.refresh:
@@ -1439,21 +1446,21 @@ class Syncache<T> {
             cancel,
             tags,
           );
-          _notify(key, isFromCache: false);
+          if (!skipNotify) _notify(key, isFromCache: false);
           return result;
         }
         final cached = await store.read(key);
         if (cached == null) {
           throw CacheMissException(key);
         }
-        _notify(key, isFromCache: true);
+        if (!skipNotify) _notify(key, isFromCache: true);
         return strategy.wrapCached(cached, isStale: cached.meta.isExpired);
 
       case Policy.offlineFirst:
         final cached = await store.read(key);
         if (cached != null && !cached.meta.isExpired) {
           _notifyObservers((o) => o.onCacheHit(key));
-          _notify(key, isFromCache: true);
+          if (!skipNotify) _notify(key, isFromCache: true);
           return strategy.wrapCached(cached, isStale: false);
         }
 
@@ -1469,7 +1476,7 @@ class Syncache<T> {
               cancel,
               tags,
             );
-            _notify(key, isFromCache: false);
+            if (!skipNotify) _notify(key, isFromCache: false);
             return result;
           } on CancelledException {
             rethrow;
@@ -1478,7 +1485,7 @@ class Syncache<T> {
               throw CacheMissException(key);
             }
             if (cached != null) {
-              _notify(key, isFromCache: true);
+              if (!skipNotify) _notify(key, isFromCache: true);
               return strategy.wrapCached(cached,
                   isStale: cached.meta.isExpired);
             }
@@ -1487,7 +1494,7 @@ class Syncache<T> {
         }
 
         if (cached != null) {
-          _notify(key, isFromCache: true);
+          if (!skipNotify) _notify(key, isFromCache: true);
           return strategy.wrapCached(cached, isStale: cached.meta.isExpired);
         }
 
@@ -1502,6 +1509,7 @@ class Syncache<T> {
           cancel: cancel,
           tags: tags,
           refreshOnlyIfExpired: true,
+          skipNotify: skipNotify,
         );
 
       case Policy.cacheAndRefresh:
@@ -1513,6 +1521,7 @@ class Syncache<T> {
           cancel: cancel,
           tags: tags,
           refreshOnlyIfExpired: false,
+          skipNotify: skipNotify,
         );
     }
   }
@@ -1530,6 +1539,7 @@ class Syncache<T> {
     required CancellationToken? cancel,
     required List<String>? tags,
     required bool refreshOnlyIfExpired,
+    bool skipNotify = false,
   }) async {
     final cached = await store.read(key);
 
@@ -1542,13 +1552,14 @@ class Syncache<T> {
       if (shouldRefresh) {
         strategy
             .backgroundRefresh(_fetchEngine, key, ttl, retry, tags)
-            .then((_) => _notify(key, isFromCache: false))
-            .catchError((Object e, StackTrace st) {
+            .then((_) {
+          _notify(key, isFromCache: false);
+        }).catchError((Object e, StackTrace st) {
           _notifyObservers((o) => o.onFetchError(key, e, st));
         });
       }
 
-      _notify(key, isFromCache: true);
+      if (!skipNotify) _notify(key, isFromCache: true);
       return strategy.wrapCached(cached, isStale: cached.meta.isExpired);
     }
 
@@ -1563,7 +1574,7 @@ class Syncache<T> {
         cancel,
         tags,
       );
-      _notify(key, isFromCache: false);
+      if (!skipNotify) _notify(key, isFromCache: false);
       return result;
     }
 

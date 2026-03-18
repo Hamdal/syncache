@@ -425,20 +425,23 @@ void main() {
         }
 
         // Start concurrent requests
-        final result1 = await cache.get(
+        final future1 = cache.get(
           key: 'dedup-car-key',
           fetch: fetcher,
           policy: Policy.cacheAndRefresh,
         );
-        final result2 = await cache.get(
+        final future2 = cache.get(
           key: 'dedup-car-key',
           fetch: fetcher,
           policy: Policy.cacheAndRefresh,
         );
 
+        // Wait for both to complete
+        final results = await Future.wait([future1, future2]);
+
         // Both should return cached value immediately
-        expect(result1, equals('cached-value'));
-        expect(result2, equals('cached-value'));
+        expect(results[0], equals('cached-value'));
+        expect(results[1], equals('cached-value'));
 
         // Complete background refresh
         completer.complete('fresh-value');
