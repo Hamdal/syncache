@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:hive/hive.dart';
+import 'package:hive_ce/hive_ce.dart';
 import 'package:syncache/syncache.dart';
 import 'package:syncache_hive/syncache_hive.dart';
 import 'package:test/test.dart';
@@ -381,7 +381,7 @@ void main() {
         expect(tags, isEmpty);
       });
 
-      test('write without tags removes existing tags', () async {
+      test('write without tags preserves existing tags', () async {
         final stored = Stored(
           value: {'name': 'Alice'},
           meta: Metadata(version: 1, storedAt: DateTime.now()),
@@ -391,7 +391,9 @@ void main() {
         await store.write('key', stored);
         final tags = await store.getTags('key');
 
-        expect(tags, isEmpty);
+        // Plain writes replace the value but must not detach the entry from
+        // its tag groups (see the TaggableStore tag lifecycle contract).
+        expect(tags, unorderedEquals(['tag1', 'tag2']));
       });
 
       test('writeWithTags replaces existing tags', () async {
@@ -854,6 +856,43 @@ void main() {
   });
 
   group('HiveStore persistence', () {
+    test('reads entries written in the pre-hive_ce on-disk shape', () async {
+      // Regression test for the hive -> hive_ce dependency swap: the entry
+      // payload shape is owned by syncache_hive, not by the storage engine,
+      // so boxes written by earlier releases must open unchanged.
+      final boxName = 'legacy_shape_${DateTime.now().millisecondsSinceEpoch}';
+      final box = await Hive.openBox<Map<dynamic, dynamic>>(boxName);
+
+      final storedAt = DateTime.now().toIso8601String();
+      await box.put('legacy', {
+        'value': {'name': 'Alice', 'score': 100},
+        'meta': {
+          'version': 3,
+          'storedAt': storedAt,
+          'ttlMs': 3600000,
+          'etag': '"abc"',
+        },
+        'tags': ['users'],
+      });
+      await box.close();
+
+      final store = await HiveStore.open<Map<String, dynamic>>(
+        boxName: boxName,
+        fromJson: (json) => json,
+        toJson: (value) => value,
+      );
+
+      final entry = await store.read('legacy');
+      expect(entry, isNotNull);
+      expect(entry!.value, equals({'name': 'Alice', 'score': 100}));
+      expect(entry.meta.version, equals(3));
+      expect(entry.meta.ttl, equals(const Duration(hours: 1)));
+      expect(entry.meta.etag, equals('"abc"'));
+      expect(await store.getTags('legacy'), equals(['users']));
+
+      await store.close();
+    });
+
     test('data persists across close and reopen', () async {
       final boxName = 'persist_test_${DateTime.now().millisecondsSinceEpoch}';
 

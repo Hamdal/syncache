@@ -224,7 +224,7 @@ void main() {
           fetch: (_) async {
             executionOrder.add('a-start');
             completer1.complete();
-            await Future.delayed(const Duration(milliseconds: 50));
+            await Future<void>.delayed(const Duration(milliseconds: 50));
             executionOrder.add('a-end');
             return 'value-a';
           },
@@ -234,7 +234,7 @@ void main() {
           fetch: (_) async {
             executionOrder.add('b-start');
             completer2.complete();
-            await Future.delayed(const Duration(milliseconds: 50));
+            await Future<void>.delayed(const Duration(milliseconds: 50));
             executionOrder.add('b-end');
             return 'value-b';
           },
@@ -291,7 +291,7 @@ void main() {
       Future<String> timedFetch(String key) async {
         timestamps['$key-start'] = time++;
         executionOrder.add(key);
-        await Future.delayed(const Duration(milliseconds: 10));
+        await Future<void>.delayed(const Duration(milliseconds: 10));
         timestamps['$key-end'] = time++;
         return 'value-$key';
       }
@@ -597,14 +597,14 @@ void main() {
         PrefetchNode<String>(
           key: 'fast',
           fetch: (_) async {
-            await Future.delayed(const Duration(milliseconds: 10));
+            await Future<void>.delayed(const Duration(milliseconds: 10));
             return 'fast-value';
           },
         ),
         PrefetchNode<String>(
           key: 'slow',
           fetch: (_) async {
-            await Future.delayed(const Duration(milliseconds: 50));
+            await Future<void>.delayed(const Duration(milliseconds: 50));
             return 'slow-value';
           },
         ),
@@ -623,7 +623,7 @@ void main() {
         PrefetchNode<String>(
           key: 'a',
           fetch: (_) async {
-            await Future.delayed(const Duration(milliseconds: 20));
+            await Future<void>.delayed(const Duration(milliseconds: 20));
             return 'value';
           },
         ),

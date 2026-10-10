@@ -82,14 +82,14 @@ void main() {
         expect(result, equals('cached-value'));
 
         // Allow microtask to start background fetch
-        await Future.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
 
         // Background fetch should have started (even though cache is valid)
         expect(fetchCount, equals(1));
 
         // Complete the background fetch
         completer.complete('fresh-value');
-        await Future.delayed(const Duration(milliseconds: 50));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
 
         // Cache should now have fresh value
         final cached = await store.read('car-key');
@@ -127,14 +127,14 @@ void main() {
         expect(result, equals('stale-value'));
 
         // Allow microtask to start background fetch
-        await Future.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
 
         // Background fetch should have started
         expect(fetchCount, equals(1));
 
         // Complete the background fetch
         completer.complete('fresh-value');
-        await Future.delayed(const Duration(milliseconds: 50));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
 
         // Cache should now have fresh value
         final cached = await store.read('stale-car-key');
@@ -239,7 +239,7 @@ void main() {
         expect(result, equals('cached-value'));
 
         // Wait for background fetch to complete (with error)
-        await Future.delayed(const Duration(milliseconds: 50));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
 
         // Cache should still have original value
         final cached = await store.read('error-key');
@@ -281,14 +281,14 @@ void main() {
         expect(result.meta.isStale, isFalse);
 
         // Allow microtask to start background fetch
-        await Future.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
 
         // Background fetch should have started
         expect(fetchCount, equals(1));
 
         // Complete background fetch
         completer.complete('fresh-value');
-        await Future.delayed(const Duration(milliseconds: 50));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
 
         // Cache should be updated
         final cached = await store.read('meta-key');
@@ -367,14 +367,14 @@ void main() {
             .listen(values.add);
 
         // Wait for initial emission
-        await Future.delayed(const Duration(milliseconds: 50));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
 
         // Should have cached value
         expect(values, contains('cached-value'));
 
         // Complete background refresh
         completer.complete('fresh-value');
-        await Future.delayed(const Duration(milliseconds: 50));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
 
         // Should have both cached and fresh values
         expect(values, contains('cached-value'));
@@ -394,7 +394,7 @@ void main() {
             )
             .listen(values.add);
 
-        await Future.delayed(const Duration(milliseconds: 50));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
 
         expect(values, equals(['fresh-value']));
 
@@ -445,7 +445,7 @@ void main() {
 
         // Complete background refresh
         completer.complete('fresh-value');
-        await Future.delayed(const Duration(milliseconds: 50));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
 
         // Should have only triggered one background fetch
         expect(fetchCount, equals(1));
@@ -524,7 +524,7 @@ void main() {
         );
 
         // Wait for background fetch to fail
-        await Future.delayed(const Duration(milliseconds: 50));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
 
         expect(
           observer.events,
@@ -552,7 +552,7 @@ void main() {
         );
 
         // Wait for background fetch to complete
-        await Future.delayed(const Duration(milliseconds: 50));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
 
         expect(observer.events, contains('store:observer-store-key'));
       });
@@ -589,7 +589,7 @@ void main() {
         );
 
         // Allow microtask queue to flush
-        await Future.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
 
         expect(swrFetchCount, equals(0),
             reason: 'staleWhileRefresh should not fetch when cache is valid');
@@ -606,7 +606,7 @@ void main() {
         );
 
         // Allow microtask to start background fetch
-        await Future.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
 
         expect(carFetchCount, equals(1),
             reason: 'cacheAndRefresh should always fetch when online');

@@ -1,0 +1,17 @@
+# Static analysis configuration for the syncache core package.
+#
+# Companion packages (syncache_flutter, syncache_hive) have their own
+# analysis_options.yaml; keep the effective rules consistent across them.
+include: package:lints/recommended.yaml
+
+analyzer:
+  language:
+    strict-casts: true
+    strict-inference: true
+    strict-raw-types: true
+
+linter:
+  rules:
+    - unawaited_futures
+    - unnecessary_lambdas
+    - only_throw_errors

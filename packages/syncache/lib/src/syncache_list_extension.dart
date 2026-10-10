@@ -117,11 +117,14 @@ extension SyncacheListExtension<T> on Syncache<List<T>> {
   /// ```
   ///
   /// For [UpdateWhereOperation], the [send] function receives the first
-  /// matching updated item. The server response updates all items that match
-  /// the [idSelector].
+  /// matching updated item (the post-apply item that carries the optimistic
+  /// changes). The server response updates all items that match the
+  /// [idSelector]. If no item matches the predicate, [send] is not called and
+  /// the cached list is left unchanged.
   ///
-  /// For [RemoveWhereOperation], [send] is called with a dummy value and
-  /// its return is ignored (since items are being removed).
+  /// For [RemoveWhereOperation], [send] is called once per removed item
+  /// (deduplicated by [idSelector], so a repeated id results in a single
+  /// server call) and its return value is ignored.
   ///
   /// Throws [CacheMissException] if no cached value exists for [key].
   /// Throws [StateError] if [send] is called but no item is available
@@ -134,42 +137,70 @@ extension SyncacheListExtension<T> on Syncache<List<T>> {
     List<String>? invalidates,
     List<String>? invalidateTags,
   }) async {
+    // Capture the pre-apply list so operations without an explicit item
+    // (updateWhere, removeWhere) can locate the affected items, even when the
+    // predicate no longer matches after the optimistic update.
+    final cached = await store.read(key);
+    final originalList = cached?.value ?? <T>[];
+
     await mutate(
       key: key,
       mutation: Mutation<List<T>>(
         apply: operation.apply,
         send: (list) async {
-          // Handle RemoveWhereOperation specially - nothing to update
           if (operation is RemoveWhereOperation<T>) {
-            // For remove, we don't have an item to send, but we still call
-            // send with a placeholder. The caller should handle this.
-            // Actually, for remove operations, we use mutateList instead.
+            // Send one server call per removed item, deduplicated by id so
+            // that a repeated id in the list is not deleted twice.
+            final sentIds = <Id>{};
+            for (final item in originalList) {
+              if (!operation.predicate(item)) continue;
+              final id = idSelector(item);
+              if (!sentIds.add(id)) continue;
+              await send(item);
+            }
             return list;
+          }
+
+          if (operation is UpdateWhereOperation<T>) {
+            // Find the first pre-update item matching the predicate, then
+            // send its post-apply version (which carries the optimistic
+            // changes). Fall back to the original item if the update changed
+            // its id.
+            T? targetItem;
+            for (final originalItem in originalList) {
+              if (!operation.predicate(originalItem)) continue;
+              final originalId = idSelector(originalItem);
+              for (final newItem in list) {
+                if (idSelector(newItem) == originalId) {
+                  targetItem = newItem;
+                  break;
+                }
+              }
+              targetItem ??= originalItem;
+              break;
+            }
+
+            if (targetItem == null) {
+              // No items matched: nothing to send, list is unchanged.
+              return list;
+            }
+
+            final serverItem = await send(targetItem);
+            final optimisticId = idSelector(targetItem);
+            final serverId = idSelector(serverItem);
+
+            return list.map((item) {
+              if (idSelector(item) == optimisticId ||
+                  idSelector(item) == serverId) {
+                return serverItem;
+              }
+              return item;
+            }).toList();
           }
 
           // Get the item from the operation
           final operationItem = operation.item;
           if (operationItem == null) {
-            // UpdateWhereOperation: find the first matching item in the list
-            if (operation is UpdateWhereOperation<T>) {
-              // Find first item that was updated (exists in new list)
-              for (final item in list) {
-                // We can't know which items were updated without the original
-                // list, so we'll send the first item that matches the predicate
-                // applied to the current list
-                final serverItem = await send(item);
-                final serverId = idSelector(serverItem);
-
-                // Update all items with matching ID
-                return list.map((i) {
-                  if (idSelector(i) == serverId) {
-                    return serverItem;
-                  }
-                  return i;
-                }).toList();
-              }
-              return list;
-            }
             throw StateError('No item available from operation');
           }
 

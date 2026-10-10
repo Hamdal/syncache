@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'cancellation.dart';
+import 'exceptions.dart';
 import 'fetcher.dart';
 import 'metadata.dart';
 import 'observer.dart';
@@ -224,7 +225,7 @@ class FetchEngine<T> {
   Future<void> _delayWithCancellation(
       Duration delay, CancellationToken? cancel) async {
     if (cancel == null) {
-      await Future.delayed(delay);
+      await Future<void>.delayed(delay);
       return;
     }
 
@@ -238,11 +239,11 @@ class FetchEngine<T> {
 
     cancel.onCancel(onCancel);
 
-    Future.delayed(delay).then((_) {
+    unawaited(Future<void>.delayed(delay).then((_) {
       if (!completer.isCompleted) {
         completer.complete();
       }
-    });
+    }));
 
     try {
       await completer.future;
@@ -296,10 +297,15 @@ class FetchEngine<T> {
 }
 
 /// Thrown when a conditional fetch returns 304 but no cached value exists.
-class CacheMissForConditionalException implements Exception {
+///
+/// Extends [CacheMissException] so callers can catch both cache-miss
+/// variants with a single `on CacheMissException` clause.
+class CacheMissForConditionalException extends CacheMissException {
+  /// The key whose conditional fetch could not be satisfied.
   final String key;
 
-  const CacheMissForConditionalException(this.key);
+  const CacheMissForConditionalException(this.key)
+      : super('No cached value for key: $key');
 
   @override
   String toString() =>

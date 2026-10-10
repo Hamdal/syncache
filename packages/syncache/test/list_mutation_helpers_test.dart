@@ -381,10 +381,10 @@ void main() {
         final updates = <List<_Item>>[];
         final subscription = cache
             .watch(key: 'items', fetch: (_) async => [])
-            .listen((items) => updates.add(items));
+            .listen(updates.add);
 
         // Wait for initial value
-        await Future.delayed(const Duration(milliseconds: 50));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
 
         await cache.mutateList(
           key: 'items',
@@ -393,7 +393,7 @@ void main() {
         );
 
         // Wait for update
-        await Future.delayed(const Duration(milliseconds: 50));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
 
         await subscription.cancel();
 
@@ -456,7 +456,7 @@ void main() {
         );
 
         // Wait for sync
-        await Future.delayed(const Duration(milliseconds: 100));
+        await Future<void>.delayed(const Duration(milliseconds: 100));
 
         final result =
             await networkCache.get(key: 'items', fetch: (_) async => []);
@@ -495,7 +495,7 @@ void main() {
         );
 
         // Wait for sync
-        await Future.delayed(const Duration(milliseconds: 100));
+        await Future<void>.delayed(const Duration(milliseconds: 100));
 
         final result =
             await networkCache.get(key: 'items', fetch: (_) async => []);
@@ -533,7 +533,7 @@ void main() {
         );
 
         // Wait for sync
-        await Future.delayed(const Duration(milliseconds: 100));
+        await Future<void>.delayed(const Duration(milliseconds: 100));
 
         final result =
             await networkCache.get(key: 'items', fetch: (_) async => []);
@@ -554,6 +554,266 @@ void main() {
           ),
           throwsA(isA<CacheMissException>()),
         );
+      });
+
+      test('updateWhere sends the matching item, not the first item', () async {
+        final controllableNetwork = _ControllableNetwork();
+        final networkCache = Syncache<List<_Item>>(
+          store: store,
+          network: controllableNetwork,
+        );
+
+        await store.write(
+          'items',
+          Stored(
+            value: [
+              const _Item(id: 'a', name: 'Alpha'),
+              const _Item(id: 'b', name: 'Beta'),
+              const _Item(id: 'c', name: 'Gamma'),
+            ],
+            meta: Metadata(version: 1, storedAt: DateTime.now()),
+          ),
+        );
+
+        final sentItems = <_Item>[];
+
+        await networkCache.mutateListItem(
+          key: 'items',
+          operation: ListOperation.updateWhere(
+            (i) => i.id == 'c',
+            (i) => i.copyWith(name: 'Updated'),
+          ),
+          send: (item) async {
+            sentItems.add(item);
+            return item;
+          },
+          idSelector: (item) => item.id,
+        );
+
+        // Wait for sync
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+
+        // Regression: this used to send the first list item ('a') instead of
+        // the item matching the predicate ('c').
+        expect(sentItems, hasLength(1));
+        expect(sentItems.single.id, equals('c'));
+        expect(sentItems.single.name, equals('Updated'));
+
+        final result =
+            await networkCache.get(key: 'items', fetch: (_) async => []);
+        expect(result[2].name, equals('Updated'));
+        expect(result[0].name, equals('Alpha'));
+
+        networkCache.dispose();
+      });
+
+      test('updateWhere with no matches does not call send', () async {
+        final controllableNetwork = _ControllableNetwork();
+        final networkCache = Syncache<List<_Item>>(
+          store: store,
+          network: controllableNetwork,
+        );
+
+        await store.write(
+          'items',
+          Stored(
+            value: [
+              const _Item(id: 'a', name: 'Alpha'),
+              const _Item(id: 'b', name: 'Beta'),
+            ],
+            meta: Metadata(version: 1, storedAt: DateTime.now()),
+          ),
+        );
+
+        var sendCount = 0;
+
+        await networkCache.mutateListItem(
+          key: 'items',
+          operation: ListOperation.updateWhere(
+            (i) => i.id == 'missing',
+            (i) => i.copyWith(name: 'Updated'),
+          ),
+          send: (item) async {
+            sendCount++;
+            return item;
+          },
+          idSelector: (item) => item.id,
+        );
+
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+
+        expect(sendCount, equals(0));
+
+        final result =
+            await networkCache.get(key: 'items', fetch: (_) async => []);
+        expect(result, hasLength(2));
+        expect(result[0].name, equals('Alpha'));
+
+        networkCache.dispose();
+      });
+
+      test('updateWhere sends the updated (post-apply) item', () async {
+        final controllableNetwork = _ControllableNetwork();
+        final networkCache = Syncache<List<_Item>>(
+          store: store,
+          network: controllableNetwork,
+        );
+
+        await store.write(
+          'items',
+          Stored(
+            value: [const _Item(id: 'a', name: 'Alpha', value: 1)],
+            meta: Metadata(version: 1, storedAt: DateTime.now()),
+          ),
+        );
+
+        _Item? sent;
+
+        await networkCache.mutateListItem(
+          key: 'items',
+          operation: ListOperation.updateWhere(
+            (i) => i.id == 'a',
+            (i) => i.copyWith(name: 'Beta'),
+          ),
+          send: (item) async {
+            sent = item;
+            return item;
+          },
+          idSelector: (item) => item.id,
+        );
+
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+
+        // The item carrying the optimistic changes is sent to the server.
+        expect(sent, isNotNull);
+        expect(sent!.name, equals('Beta'));
+
+        networkCache.dispose();
+      });
+
+      test('removeWhere calls send for each removed item', () async {
+        final controllableNetwork = _ControllableNetwork();
+        final networkCache = Syncache<List<_Item>>(
+          store: store,
+          network: controllableNetwork,
+        );
+
+        await store.write(
+          'items',
+          Stored(
+            value: [
+              const _Item(id: 'a', name: 'Alpha'),
+              const _Item(id: 'b', name: 'Beta'),
+              const _Item(id: 'c', name: 'Gamma'),
+            ],
+            meta: Metadata(version: 1, storedAt: DateTime.now()),
+          ),
+        );
+
+        final sentIds = <String>[];
+
+        await networkCache.mutateListItem(
+          key: 'items',
+          operation: ListOperation.removeWhere(
+            (i) => i.id == 'a' || i.id == 'c',
+          ),
+          send: (item) async {
+            sentIds.add(item.id);
+            return item;
+          },
+          idSelector: (item) => item.id,
+        );
+
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+
+        // Regression: send() used to never be called for remove operations,
+        // so the server delete never happened.
+        expect(sentIds, unorderedEquals(['a', 'c']));
+
+        final result =
+            await networkCache.get(key: 'items', fetch: (_) async => []);
+        expect(result, hasLength(1));
+        expect(result.single.id, equals('b'));
+
+        networkCache.dispose();
+      });
+
+      test('removeWhere with no matches does not call send', () async {
+        final controllableNetwork = _ControllableNetwork();
+        final networkCache = Syncache<List<_Item>>(
+          store: store,
+          network: controllableNetwork,
+        );
+
+        await store.write(
+          'items',
+          Stored(
+            value: [const _Item(id: 'a', name: 'Alpha')],
+            meta: Metadata(version: 1, storedAt: DateTime.now()),
+          ),
+        );
+
+        var sendCount = 0;
+
+        await networkCache.mutateListItem(
+          key: 'items',
+          operation: ListOperation.removeWhere((i) => i.id == 'missing'),
+          send: (item) async {
+            sendCount++;
+            return item;
+          },
+          idSelector: (item) => item.id,
+        );
+
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+
+        expect(sendCount, equals(0));
+
+        final result =
+            await networkCache.get(key: 'items', fetch: (_) async => []);
+        expect(result, hasLength(1));
+
+        networkCache.dispose();
+      });
+
+      test('removeWhere deduplicates sends by id', () async {
+        final controllableNetwork = _ControllableNetwork();
+        final networkCache = Syncache<List<_Item>>(
+          store: store,
+          network: controllableNetwork,
+        );
+
+        // Two entries sharing an id: the server resource must be deleted once.
+        await store.write(
+          'items',
+          Stored(
+            value: [
+              const _Item(id: 'x', name: 'First'),
+              const _Item(id: 'x', name: 'Duplicate'),
+              const _Item(id: 'y', name: 'Other'),
+            ],
+            meta: Metadata(version: 1, storedAt: DateTime.now()),
+          ),
+        );
+
+        final sentIds = <String>[];
+
+        await networkCache.mutateListItem(
+          key: 'items',
+          operation: ListOperation.removeWhere((i) => i.id == 'x'),
+          send: (item) async {
+            sentIds.add(item.id);
+            return item;
+          },
+          idSelector: (item) => item.id,
+        );
+
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+
+        expect(sentIds, hasLength(1));
+        expect(sentIds.single, equals('x'));
+
+        networkCache.dispose();
       });
     });
 
@@ -590,7 +850,7 @@ void main() {
         );
 
         // Wait for sync
-        await Future.delayed(const Duration(milliseconds: 100));
+        await Future<void>.delayed(const Duration(milliseconds: 100));
 
         // The related entry should be invalidated
         final relatedEntry = await taggableStore.read('related');
@@ -624,7 +884,7 @@ void main() {
         );
 
         // Wait for sync
-        await Future.delayed(const Duration(milliseconds: 100));
+        await Future<void>.delayed(const Duration(milliseconds: 100));
 
         // items-count should be invalidated
         final countEntry = await store.read('items-count');

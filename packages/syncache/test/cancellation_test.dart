@@ -77,14 +77,13 @@ void main() {
 
     test('throwIfCancelled does nothing when not cancelled', () {
       final token = CancellationToken();
-      expect(() => token.throwIfCancelled(), returnsNormally);
+      expect(token.throwIfCancelled, returnsNormally);
     });
 
     test('throwIfCancelled throws when cancelled', () {
       final token = CancellationToken();
       token.cancel();
-      expect(
-          () => token.throwIfCancelled(), throwsA(isA<CancelledException>()));
+      expect(token.throwIfCancelled, throwsA(isA<CancelledException>()));
     });
 
     test('onCancel callback error does not break other callbacks', () {
@@ -172,7 +171,7 @@ void main() {
         key: 'test',
         fetch: (_) async {
           fetchStarted.complete();
-          await Future.delayed(Duration(milliseconds: 100));
+          await Future<void>.delayed(Duration(milliseconds: 100));
           return 'data';
         },
         cancel: token,
@@ -194,7 +193,7 @@ void main() {
           final result = 'data';
           fetchCompleted.complete();
           // Small delay to allow cancellation to be processed
-          await Future.delayed(Duration(milliseconds: 10));
+          await Future<void>.delayed(Duration(milliseconds: 10));
           return result;
         },
         cancel: token,
@@ -221,7 +220,7 @@ void main() {
           if (fetchCount == 1) {
             throw Exception('First attempt fails');
           }
-          await Future.delayed(Duration(milliseconds: 100));
+          await Future<void>.delayed(Duration(milliseconds: 100));
           return 'data';
         },
         retry: RetryConfig(
@@ -232,7 +231,7 @@ void main() {
       );
 
       // Wait for first failure and retry delay to start
-      await Future.delayed(Duration(milliseconds: 30));
+      await Future<void>.delayed(Duration(milliseconds: 30));
       token.cancel();
 
       await expectLater(future, throwsA(isA<CancelledException>()));
@@ -260,7 +259,7 @@ void main() {
       );
 
       // Wait for first failure
-      await Future.delayed(Duration(milliseconds: 50));
+      await Future<void>.delayed(Duration(milliseconds: 50));
       token.cancel();
 
       final stopwatch = Stopwatch()..start();
@@ -292,7 +291,7 @@ void main() {
         key: 'test',
         fetch: (_) async {
           fetchStarted.complete();
-          await Future.delayed(Duration(milliseconds: 100));
+          await Future<void>.delayed(Duration(milliseconds: 100));
           return 'fresh';
         },
         policy: Policy.offlineFirst,
@@ -382,7 +381,7 @@ void main() {
         key: 'test',
         fetch: (_) async {
           fetchStarted.complete();
-          await Future.delayed(Duration(milliseconds: 100));
+          await Future<void>.delayed(Duration(milliseconds: 100));
           return 'data';
         },
         cancel: token,
@@ -407,7 +406,7 @@ void main() {
         key: 'test',
         fetch: (_) async {
           fetchStarted.complete();
-          await Future.delayed(Duration(milliseconds: 50));
+          await Future<void>.delayed(Duration(milliseconds: 50));
           return 'data';
         },
         cancel: token,
@@ -442,7 +441,7 @@ void main() {
         key: 'test',
         fetch: (_) async {
           fetchStarted.complete();
-          await Future.delayed(Duration(milliseconds: 100));
+          await Future<void>.delayed(Duration(milliseconds: 100));
           return 'data';
         },
         policy: Policy.networkOnly,

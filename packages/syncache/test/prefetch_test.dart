@@ -117,7 +117,7 @@ void main() {
       // Create slow fetchers to verify parallel execution
       Future<String> createFetcher(String key) async {
         fetchOrder.add('start:$key');
-        await Future.delayed(Duration(milliseconds: 50));
+        await Future<void>.delayed(Duration(milliseconds: 50));
         fetchOrder.add('end:$key');
         return 'data:$key';
       }
@@ -476,7 +476,7 @@ void main() {
             key: 'test',
             fetch: (_) async {
               fetchCount++;
-              await Future.delayed(Duration(milliseconds: 50));
+              await Future<void>.delayed(Duration(milliseconds: 50));
               return 'data';
             },
           ),
@@ -485,7 +485,7 @@ void main() {
           key: 'test',
           fetch: (_) async {
             fetchCount++;
-            await Future.delayed(Duration(milliseconds: 50));
+            await Future<void>.delayed(Duration(milliseconds: 50));
             return 'data';
           },
           policy: Policy.networkOnly,

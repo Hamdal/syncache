@@ -134,7 +134,7 @@ void main() {
         final sub = stream.listen(results.add);
 
         // Wait for initial fetch
-        await Future.delayed(const Duration(milliseconds: 50));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
         expect(results.isNotEmpty, isTrue);
         expect(results.last.value, equals('initial-value'));
         // Initial fetch should have isFromCache: false (fresh from network)
@@ -154,7 +154,7 @@ void main() {
           ),
         );
 
-        await Future.delayed(const Duration(milliseconds: 50));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
         expect(results.length, greaterThan(initialCount));
         expect(results.last.value, equals('mutated-value'));
         // After mutation sync, value is fresh from server (not from cache)
@@ -200,7 +200,7 @@ void main() {
         ),
       );
 
-      await Future.delayed(const Duration(milliseconds: 50));
+      await Future<void>.delayed(const Duration(milliseconds: 50));
 
       expect(snapshots.isNotEmpty, isTrue);
       expect(snapshots.last.length, equals(1));
@@ -277,13 +277,13 @@ void main() {
         mutation: Mutation(
           apply: (v) => 'mutated',
           send: (v) async {
-            await Future.delayed(const Duration(milliseconds: 20));
+            await Future<void>.delayed(const Duration(milliseconds: 20));
             return v;
           },
         ),
       );
 
-      await Future.delayed(const Duration(milliseconds: 100));
+      await Future<void>.delayed(const Duration(milliseconds: 100));
 
       // Should have emitted both false (has pending) and true (all synced)
       expect(syncStates, contains(false));
@@ -319,7 +319,7 @@ void main() {
         mutation: Mutation(
           apply: (v) => 'mutated',
           send: (v) async {
-            await Future.delayed(const Duration(milliseconds: 20));
+            await Future<void>.delayed(const Duration(milliseconds: 20));
             return v;
           },
         ),
@@ -463,11 +463,11 @@ void main() {
           onDone: () => streamClosed = true,
         );
 
-        await Future.delayed(const Duration(milliseconds: 50));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
 
         await cache.invalidateTag('events');
 
-        await Future.delayed(const Duration(milliseconds: 50));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
         expect(streamClosed, isTrue);
       });
     });
@@ -644,7 +644,7 @@ void main() {
       );
 
       // Wait for sync to complete
-      await Future.delayed(const Duration(milliseconds: 100));
+      await Future<void>.delayed(const Duration(milliseconds: 100));
 
       // Mutated entry should still exist (updated)
       expect(await store.read('event:456'), isNotNull);
@@ -687,7 +687,7 @@ void main() {
       );
 
       // Wait for sync
-      await Future.delayed(const Duration(milliseconds: 100));
+      await Future<void>.delayed(const Duration(milliseconds: 100));
 
       // Mutated entry should still exist
       expect(await store.read('event:456'), isNotNull);
@@ -729,7 +729,7 @@ void main() {
         invalidateTags: ['dashboard'],
       );
 
-      await Future.delayed(const Duration(milliseconds: 100));
+      await Future<void>.delayed(const Duration(milliseconds: 100));
 
       expect(await store.read('event:456'), isNotNull);
       expect(await store.read('list:events'), isNull);
@@ -760,7 +760,7 @@ void main() {
       } catch (_) {}
 
       // Wait for mutation to fail
-      await Future.delayed(const Duration(milliseconds: 200));
+      await Future<void>.delayed(const Duration(milliseconds: 200));
 
       // Related entries should NOT be invalidated since sync failed
       expect(await store.read('calendar-view'), isNotNull);
@@ -1190,7 +1190,7 @@ void main() {
         );
 
         final sub = stream.listen(values.add);
-        await Future.delayed(const Duration(milliseconds: 50));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
 
         expect(values.isNotEmpty, isTrue);
         expect(values.last, equals('initial'));
@@ -1204,7 +1204,7 @@ void main() {
           ),
         );
 
-        await Future.delayed(const Duration(milliseconds: 50));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
         expect(values.last, equals('mutated'));
 
         await sub.cancel();
@@ -1229,7 +1229,7 @@ void main() {
           ),
         );
 
-        await Future.delayed(const Duration(milliseconds: 50));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
 
         expect(
           (await store.read('workspace:123:item'))!.value,
@@ -1255,7 +1255,7 @@ void main() {
           invalidates: ['list:*'],
         );
 
-        await Future.delayed(const Duration(milliseconds: 100));
+        await Future<void>.delayed(const Duration(milliseconds: 100));
 
         // Scoped list entry should be invalidated
         expect(await store.read('workspace:123:list:items'), isNull);
@@ -1408,6 +1408,85 @@ void main() {
 
         expect(success, isTrue);
         expect(await store.read('workspace:123:single'), isNotNull);
+      });
+
+      test('passes retry config through', () async {
+        final scoped = cache.scoped('workspace:123');
+        var attempts = 0;
+
+        // First attempt fails; the retry config allows one more attempt.
+        final success = await scoped.prefetchOne(
+          key: 'flaky',
+          fetch: (_) async {
+            attempts++;
+            if (attempts == 1) throw StateError('transient');
+            return 'recovered';
+          },
+          retry: const RetryConfig(maxAttempts: 1),
+        );
+
+        expect(success, isTrue);
+        expect(attempts, equals(2));
+        expect(await store.read('workspace:123:flaky'), isNotNull);
+      });
+    });
+
+    group('ScopedSyncache.set()', () {
+      test('sets value under the scoped key', () async {
+        final scoped = cache.scoped('workspace:123');
+
+        await scoped.set(key: 'token', value: 'abc');
+
+        expect(
+          (await store.read('workspace:123:token'))!.value,
+          equals('abc'),
+        );
+      });
+
+      test('notifies watchers of the scoped key', () async {
+        final scoped = cache.scoped('workspace:123');
+        final values = <String>[];
+
+        final stream = scoped.watch(
+          key: 'token',
+          fetch: (_) async => 'initial',
+        );
+        final sub = stream.listen(values.add);
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+
+        await scoped.set(key: 'token', value: 'updated');
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+
+        expect(values.last, equals('updated'));
+
+        await sub.cancel();
+      });
+    });
+
+    group('ScopedSyncache.watchWithDependencies()', () {
+      test('scopes the key and dependency keys', () async {
+        final scoped = cache.scoped('workspace:123');
+        final values = <String>[];
+
+        final stream = scoped.watchWithDependencies(
+          key: 'events',
+          fetch: (_) async => 'events-data',
+          refetchWhen: ['workspace:current'],
+        );
+        final sub = stream.listen(values.add);
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+
+        expect(values, isNotEmpty);
+        expect(values.last, equals('events-data'));
+
+        // Setting the scoped dependency triggers a refetch.
+        await cache.set(key: 'workspace:123:workspace:current', value: 'ws');
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+
+        // The watcher refetches via Policy.refresh against the same fetcher.
+        expect(values.last, equals('events-data'));
+
+        await sub.cancel();
       });
     });
 

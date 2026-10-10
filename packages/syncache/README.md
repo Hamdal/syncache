@@ -8,7 +8,7 @@ Syncache provides a unified API for caching data with multiple strategies, react
 
 ```yaml
 dependencies:
-  syncache: ^0.1.0
+  syncache: ^0.1.2
 ```
 
 ## Quick Start
@@ -40,7 +40,7 @@ cache.watch(
 
 ### Caching Policies
 
-Control how data is fetched and cached with five built-in policies:
+Control how data is fetched and cached with six built-in policies:
 
 | Policy | Behavior |
 |--------|----------|
@@ -49,6 +49,7 @@ Control how data is fetched and cached with five built-in policies:
 | `networkOnly` | Always fetches from network; ignores cache |
 | `refresh` | Fetches from network if online; falls back to cache if offline |
 | `staleWhileRefresh` | Returns cache immediately; refreshes in background if expired |
+| `cacheAndRefresh` | Returns cache immediately; always refreshes in background |
 
 ```dart
 final user = await cache.get(
@@ -133,8 +134,6 @@ final user = await cache.get(
   fetch: fetchUser,
   retry: RetryConfig(
     maxAttempts: 3,
-    delay: Duration(seconds: 1),
-    multiplier: 2.0,
     retryIf: (error) => error is SocketException,
   ),
 );
@@ -257,11 +256,12 @@ Provide a custom `Network` implementation for offline detection:
 
 ```dart
 class ConnectivityNetwork implements Network {
+  final Connectivity _connectivity;
+
+  ConnectivityNetwork(this._connectivity);
+
   @override
-  Future<bool> get isOnline async {
-    final result = await Connectivity().checkConnectivity();
-    return result != ConnectivityResult.none;
-  }
+  bool get isOnline => _connectivity.hasConnection;
 }
 
 final cache = Syncache<User>(

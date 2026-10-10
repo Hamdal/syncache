@@ -25,7 +25,7 @@ An offline-first cache and sync engine for Dart and Flutter applications.
 
 ```yaml
 dependencies:
-  syncache: ^0.1.0
+  syncache: ^0.1.2
 ```
 
 ```dart
@@ -44,8 +44,8 @@ final user = await cache.get(
 
 ```yaml
 dependencies:
-  syncache: ^0.1.0
-  syncache_flutter: ^0.1.0
+  syncache: ^0.1.2
+  syncache_flutter: ^0.1.2
 ```
 
 ```dart
@@ -74,9 +74,9 @@ CacheBuilder<User>(
 
 ```yaml
 dependencies:
-  syncache: ^0.1.0
-  syncache_hive: ^0.1.0
-  hive: ^2.2.0
+  syncache: ^0.1.2
+  syncache_hive: ^0.1.2
+  hive_ce: ^2.20.2
 ```
 
 ```dart

@@ -3,11 +3,7 @@ import 'package:test/test.dart';
 
 void main() {
   group('SharedMemoryStore', () {
-    tearDown(() {
-      // Clean up after each test
-      SharedMemoryStore.clearAll();
-    });
-
+    tearDown(SharedMemoryStore.clearAll);
     test('stores and retrieves values', () async {
       final store = SharedMemoryStore<String>(namespace: 'test');
       final stored = Stored(

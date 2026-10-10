@@ -2,6 +2,7 @@ library syncache;
 
 export 'src/cache_result.dart' show CacheResult, CacheResultMeta;
 export 'src/cancellation.dart' show CancellationToken, CancelledException;
+export 'src/fetch_engine.dart' show CacheMissForConditionalException;
 export 'src/fetcher.dart'
     show Fetcher, SyncacheRequest, FetchResult, ConditionalFetcher;
 export 'src/memory_store.dart' show MemoryStore;

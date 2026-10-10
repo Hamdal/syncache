@@ -6,7 +6,7 @@
 /// ## Getting Started
 ///
 /// ```dart
-/// import 'package:hive/hive.dart';
+/// import 'package:hive_ce/hive_ce.dart';
 /// import 'package:syncache/syncache.dart';
 /// import 'package:syncache_hive/syncache_hive.dart';
 ///
@@ -34,10 +34,10 @@
 ///
 /// ## Flutter Usage
 ///
-/// For Flutter apps, use the `hive_flutter` package:
+/// For Flutter apps, use the `hive_ce_flutter` package:
 ///
 /// ```dart
-/// import 'package:hive_flutter/hive_flutter.dart';
+/// import 'package:hive_ce_flutter/hive_ce_flutter.dart';
 ///
 /// void main() async {
 ///   WidgetsFlutterBinding.ensureInitialized();

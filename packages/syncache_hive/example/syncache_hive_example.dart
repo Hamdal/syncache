@@ -2,7 +2,7 @@
 
 import 'dart:io';
 
-import 'package:hive/hive.dart';
+import 'package:hive_ce/hive_ce.dart';
 import 'package:syncache/syncache.dart';
 import 'package:syncache_hive/syncache_hive.dart';
 
