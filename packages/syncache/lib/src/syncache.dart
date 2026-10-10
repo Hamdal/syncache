@@ -101,8 +101,14 @@ class Syncache<T> {
   /// Key: dependency key, Value: set of keys that depend on it.
   final Map<String, Set<String>> _dependents = {};
 
-  /// Key: watcher key, Value: info about the watcher including its fetcher.
-  final Map<String, _DependencyWatcher<T>> _dependencyWatchers = {};
+  /// Active value-watch registrations (`watch` / `watchWithDependencies`),
+  /// keyed by cache key. Records the parameters each watcher was created
+  /// with so its entry can be refetched with those same parameters.
+  final Map<String, _WatchRegistration<T>> _watchers = {};
+
+  /// Active metadata-watch registrations (`watchWithMeta`), keyed by cache
+  /// key.
+  final Map<String, _WatchRegistration<T>> _metaWatchers = {};
 
   /// Creates a [Syncache] instance with the given [store] and optional [network].
   ///
@@ -388,12 +394,12 @@ class Syncache<T> {
     }
 
     for (final dependentKey in dependentKeys.toList()) {
-      final watcher = _dependencyWatchers[dependentKey];
+      final watcher = _watchers[dependentKey];
       if (watcher == null) continue;
 
       final controller = _controllers[dependentKey];
       if (controller == null || controller.isClosed) {
-        _removeDependencyWatcher(dependentKey);
+        _removeValueWatcher(dependentKey);
         continue;
       }
 
@@ -412,16 +418,49 @@ class Syncache<T> {
     }
   }
 
-  /// Removes a dependency watcher and cleans up tracking.
-  void _removeDependencyWatcher(String key) {
-    final watcher = _dependencyWatchers.remove(key);
+  /// Removes a value-watch registration and cleans up its dependency edges.
+  void _removeValueWatcher(String key) {
+    final watcher = _watchers.remove(key);
     if (watcher == null) return;
 
-    for (final dep in watcher.dependsOn) {
+    _removeDependentEdges(key, watcher.dependsOn);
+  }
+
+  /// Removes the dependent edges [key] contributes for each of [dependsOn].
+  void _removeDependentEdges(String key, List<String> dependsOn) {
+    for (final dep in dependsOn) {
       _dependents[dep]?.remove(key);
       if (_dependents[dep]?.isEmpty ?? false) {
         _dependents.remove(dep);
       }
+    }
+  }
+
+  /// Records a watch registration in [registry] for [key], replacing any
+  /// previous registration and re-wiring its dependency edges.
+  void _registerWatcher(
+    Map<String, _WatchRegistration<T>> registry,
+    String key, {
+    required Fetcher<T> fetch,
+    required Policy policy,
+    required Duration? ttl,
+    List<String> dependsOn = const [],
+  }) {
+    final existing = registry[key];
+    if (existing != null) {
+      _removeDependentEdges(key, existing.dependsOn);
+    }
+
+    registry[key] = _WatchRegistration<T>(
+      key: key,
+      fetch: fetch,
+      policy: policy,
+      ttl: ttl,
+      dependsOn: dependsOn,
+    );
+
+    for (final dep in dependsOn) {
+      _dependents.putIfAbsent(dep, () => {}).add(key);
     }
   }
 
@@ -467,9 +506,12 @@ class Syncache<T> {
         onCancel: () {
           _controllers[key]?.close();
           _controllers.remove(key);
+          _removeValueWatcher(key);
         },
       ),
     );
+
+    _registerWatcher(_watchers, key, fetch: fetch, policy: policy, ttl: ttl);
 
     final controllerAtStart = controller;
 
@@ -527,9 +569,13 @@ class Syncache<T> {
         onCancel: () {
           _metaControllers[key]?.close();
           _metaControllers.remove(key);
+          _metaWatchers.remove(key);
         },
       ),
     );
+
+    _registerWatcher(_metaWatchers, key,
+        fetch: fetch, policy: policy, ttl: ttl);
 
     final controllerAtStart = controller;
 
@@ -609,27 +655,24 @@ class Syncache<T> {
       return watch(key: key, fetch: fetch, policy: policy, ttl: ttl);
     }
 
-    _dependencyWatchers[key] = _DependencyWatcher<T>(
-      key: key,
-      fetch: fetch,
-      policy: policy,
-      ttl: ttl,
-      dependsOn: refetchWhen,
-    );
-
-    for (final dep in refetchWhen) {
-      _dependents.putIfAbsent(dep, () => {}).add(key);
-    }
-
     final controller = _controllers.putIfAbsent(
       key,
       () => StreamController<T>.broadcast(
         onCancel: () {
           _controllers[key]?.close();
           _controllers.remove(key);
-          _removeDependencyWatcher(key);
+          _removeValueWatcher(key);
         },
       ),
+    );
+
+    _registerWatcher(
+      _watchers,
+      key,
+      fetch: fetch,
+      policy: policy,
+      ttl: ttl,
+      dependsOn: refetchWhen,
     );
 
     final controllerAtStart = controller;
@@ -1275,6 +1318,11 @@ class Syncache<T> {
     }
     _metaControllers.clear();
 
+    // Clear watch registrations and dependency tracking
+    _watchers.clear();
+    _metaWatchers.clear();
+    _dependents.clear();
+
     // Dispose mutation queue
     _mutationQueue.dispose();
 
@@ -1582,8 +1630,13 @@ class Syncache<T> {
   }
 }
 
-/// Internal class to track dependency watcher information.
-class _DependencyWatcher<T> {
+/// Internal record of an active watch registration.
+///
+/// Carries the parameters a watcher was created with so the cache can
+/// refetch with the watcher's own fetch/policy/ttl, and — for
+/// [Syncache.watchWithDependencies] — tracks the dependency keys that
+/// trigger refetches.
+class _WatchRegistration<T> {
   /// The cache key being watched.
   final String key;
 
@@ -1596,15 +1649,15 @@ class _DependencyWatcher<T> {
   /// The TTL to use when refetching.
   final Duration? ttl;
 
-  /// The keys this watcher depends on.
+  /// The keys this watcher depends on (empty for plain watchers).
   final List<String> dependsOn;
 
-  const _DependencyWatcher({
+  const _WatchRegistration({
     required this.key,
     required this.fetch,
     required this.policy,
     required this.ttl,
-    required this.dependsOn,
+    this.dependsOn = const [],
   });
 }
 
