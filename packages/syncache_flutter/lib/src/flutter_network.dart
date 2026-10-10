@@ -36,7 +36,24 @@ import 'package:syncache/syncache.dart';
 /// On web, `connectivity_plus` uses `navigator.onLine` which may not always
 /// be reliable. Consider providing a custom [Network] implementation for
 /// web-specific needs.
-class FlutterNetwork implements Network {
+///
+/// ## Automatic mutation flush on reconnect
+///
+/// [FlutterNetwork] implements [ReactiveNetwork]. Passing it to a
+/// [Syncache] makes the cache flush pending mutations automatically when
+/// connectivity is restored — no `mutate()` call or manual listener
+/// required:
+///
+/// ```dart
+/// final network = FlutterNetwork();
+/// await network.initialize();
+///
+/// final cache = Syncache<Todo>(
+///   store: store,
+///   network: network, // queued mutations sync when back online
+/// );
+/// ```
+class FlutterNetwork implements ReactiveNetwork {
   final Connectivity _connectivity;
   StreamSubscription<List<ConnectivityResult>>? _subscription;
 
@@ -165,6 +182,7 @@ class FlutterNetwork implements Network {
   ///   }
   /// });
   /// ```
+  @override
   Stream<bool> get onConnectivityChanged => _connectivityController.stream;
 
   /// Dispose of resources.

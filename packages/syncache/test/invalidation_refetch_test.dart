@@ -24,13 +24,15 @@ void main() {
         final values = <String>[];
         var done = false;
 
-        final sub = cache.watch(
-          key: 'user:1',
-          fetch: (_) async => serverValue,
-        ).listen(
-          values.add,
-          onDone: () => done = true,
-        );
+        final sub = cache
+            .watch(
+              key: 'user:1',
+              fetch: (_) async => serverValue,
+            )
+            .listen(
+              values.add,
+              onDone: () => done = true,
+            );
 
         // Wait for the initial fetch.
         await Future<void>.delayed(const Duration(milliseconds: 20));
@@ -46,26 +48,27 @@ void main() {
         await sub.cancel();
       });
 
-      test('emits the refetch error and remains usable afterwards',
-          () async {
+      test('emits the refetch error and remains usable afterwards', () async {
         var shouldFail = false;
         var fetchCount = 0;
         final values = <String>[];
         final errors = <Object>[];
         var done = false;
 
-        final sub = cache.watch(
-          key: 'user:1',
-          fetch: (_) async {
-            fetchCount++;
-            if (shouldFail) throw Exception('network down');
-            return 'v$fetchCount';
-          },
-        ).listen(
-          values.add,
-          onError: errors.add,
-          onDone: () => done = true,
-        );
+        final sub = cache
+            .watch(
+              key: 'user:1',
+              fetch: (_) async {
+                fetchCount++;
+                if (shouldFail) throw Exception('network down');
+                return 'v$fetchCount';
+              },
+            )
+            .listen(
+              values.add,
+              onError: errors.add,
+              onDone: () => done = true,
+            );
 
         await Future<void>.delayed(const Duration(milliseconds: 20));
         expect(values, ['v1']);
@@ -98,15 +101,17 @@ void main() {
         final errors = <Object>[];
         var done = false;
 
-        final sub = cache.watch(
-          key: 'user:1',
-          fetch: (_) async => 'v1',
-          policy: Policy.cacheOnly,
-        ).listen(
-          (_) {},
-          onError: errors.add,
-          onDone: () => done = true,
-        );
+        final sub = cache
+            .watch(
+              key: 'user:1',
+              fetch: (_) async => 'v1',
+              policy: Policy.cacheOnly,
+            )
+            .listen(
+              (_) {},
+              onError: errors.add,
+              onDone: () => done = true,
+            );
 
         await Future<void>.delayed(const Duration(milliseconds: 20));
         expect(errors, isEmpty);
@@ -123,13 +128,15 @@ void main() {
 
       test('does not refetch unsubscribed watchers', () async {
         var fetchCount = 0;
-        final sub = cache.watch(
-          key: 'user:1',
-          fetch: (_) async {
-            fetchCount++;
-            return 'v$fetchCount';
-          },
-        ).listen((_) {});
+        final sub = cache
+            .watch(
+              key: 'user:1',
+              fetch: (_) async {
+                fetchCount++;
+                return 'v$fetchCount';
+              },
+            )
+            .listen((_) {});
 
         await Future<void>.delayed(const Duration(milliseconds: 20));
         expect(fetchCount, 1);
@@ -149,13 +156,15 @@ void main() {
         final results = <CacheResult<String>>[];
         var done = false;
 
-        final sub = cache.watchWithMeta(
-          key: 'user:1',
-          fetch: (_) async => serverValue,
-        ).listen(
-          results.add,
-          onDone: () => done = true,
-        );
+        final sub = cache
+            .watchWithMeta(
+              key: 'user:1',
+              fetch: (_) async => serverValue,
+            )
+            .listen(
+              results.add,
+              onDone: () => done = true,
+            );
 
         await Future<void>.delayed(const Duration(milliseconds: 20));
         expect(results, hasLength(1));
@@ -184,13 +193,15 @@ void main() {
         final values = <String>[];
         var done = false;
 
-        final sub = cache.watch(
-          key: 'event:1',
-          fetch: (_) async => serverValue,
-        ).listen(
-          values.add,
-          onDone: () => done = true,
-        );
+        final sub = cache
+            .watch(
+              key: 'event:1',
+              fetch: (_) async => serverValue,
+            )
+            .listen(
+              values.add,
+              onDone: () => done = true,
+            );
 
         await Future<void>.delayed(const Duration(milliseconds: 20));
         final initialCount = values.length;
@@ -223,14 +234,18 @@ void main() {
         final user1Values = <String>[];
         final user2Values = <String>[];
 
-        final sub1 = cache.watch(
-          key: 'user:1',
-          fetch: (_) async => serverValue,
-        ).listen(user1Values.add);
-        final sub2 = cache.watch(
-          key: 'user:2',
-          fetch: (_) async => serverValue,
-        ).listen(user2Values.add);
+        final sub1 = cache
+            .watch(
+              key: 'user:1',
+              fetch: (_) async => serverValue,
+            )
+            .listen(user1Values.add);
+        final sub2 = cache
+            .watch(
+              key: 'user:2',
+              fetch: (_) async => serverValue,
+            )
+            .listen(user2Values.add);
 
         await Future<void>.delayed(const Duration(milliseconds: 20));
 
@@ -257,13 +272,15 @@ void main() {
         final values = <String>[];
         var done = false;
 
-        final sub = cache.watch(
-          key: 'user:1',
-          fetch: (_) async => serverValue,
-        ).listen(
-          values.add,
-          onDone: () => done = true,
-        );
+        final sub = cache
+            .watch(
+              key: 'user:1',
+              fetch: (_) async => serverValue,
+            )
+            .listen(
+              values.add,
+              onDone: () => done = true,
+            );
 
         await Future<void>.delayed(const Duration(milliseconds: 20));
 
@@ -289,21 +306,23 @@ void main() {
         final errors = <Object>[];
         var done = false;
 
-        final sub = cache.watch(
-          key: 'user:1',
-          fetch: (_) async {
-            fetchCount++;
-            return 'u$fetchCount';
-          },
-          // networkOnly so the initial load performs a real fetch; the test
-          // then proves that clear(refetchWatchers: false) causes no further
-          // fetches.
-          policy: Policy.networkOnly,
-        ).listen(
-          values.add,
-          onError: errors.add,
-          onDone: () => done = true,
-        );
+        final sub = cache
+            .watch(
+              key: 'user:1',
+              fetch: (_) async {
+                fetchCount++;
+                return 'u$fetchCount';
+              },
+              // networkOnly so the initial load performs a real fetch; the test
+              // then proves that clear(refetchWatchers: false) causes no further
+              // fetches.
+              policy: Policy.networkOnly,
+            )
+            .listen(
+              values.add,
+              onError: errors.add,
+              onDone: () => done = true,
+            );
 
         await Future<void>.delayed(const Duration(milliseconds: 20));
         final valuesAfterInitial = values.length;

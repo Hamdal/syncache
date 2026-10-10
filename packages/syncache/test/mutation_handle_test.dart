@@ -47,8 +47,8 @@ void main() {
 
       expect(handle.isSettled, isTrue);
       expect(outcome, isA<MutationSuccess<String>>());
-      expect((outcome as MutationSuccess<String>).serverValue,
-          'server-confirmed');
+      expect(
+          (outcome as MutationSuccess<String>).serverValue, 'server-confirmed');
 
       // The cache holds the server-confirmed value.
       final stored = await store.read('k');
@@ -113,8 +113,7 @@ void main() {
           reason: 'exhausted mutation is removed from the queue');
     });
 
-    test('resolves with failure when the error is not retryable',
-        () async {
+    test('resolves with failure when the error is not retryable', () async {
       await seedValue('k');
       final failingCache = Syncache<String>(
         store: store,
@@ -232,8 +231,7 @@ void main() {
       );
 
       final outcome = await handle.outcome;
-      expect((outcome as MutationSuccess<String>).serverValue,
-          'scoped-server');
+      expect((outcome as MutationSuccess<String>).serverValue, 'scoped-server');
     });
 
     test('outcome future does not error on failure', () async {

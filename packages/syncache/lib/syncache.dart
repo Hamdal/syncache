@@ -15,7 +15,7 @@ export 'src/mutation_handle.dart'
         MutationSuccess,
         MutationFailure,
         MutationDiscarded;
-export 'src/network.dart' show Network, AlwaysOnline;
+export 'src/network.dart' show Network, ReactiveNetwork, AlwaysOnline;
 export 'src/observer.dart' show SyncacheObserver;
 export 'src/logging_observer.dart' show LoggingObserver;
 export 'src/pending_mutation_info.dart'

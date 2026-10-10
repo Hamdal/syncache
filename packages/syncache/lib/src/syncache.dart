@@ -111,10 +111,19 @@ class Syncache<T> {
   /// key.
   final Map<String, _WatchRegistration<T>> _metaWatchers = {};
 
+  /// Subscription to a [ReactiveNetwork]'s connectivity changes, used to
+  /// flush pending mutations when the device comes back online. Null when
+  /// the provided [network] is not a [ReactiveNetwork].
+  StreamSubscription<bool>? _connectivitySubscription;
+
   /// Creates a [Syncache] instance with the given [store] and optional [network].
   ///
   /// If [network] is not provided, [AlwaysOnline] is used, meaning the cache
   /// will always attempt network requests when needed.
+  ///
+  /// If [network] is a [ReactiveNetwork], the cache subscribes to its
+  /// connectivity changes and automatically flushes pending mutations when
+  /// the device comes back online — no new `mutate()` call required.
   ///
   /// Provide [observers] to monitor cache operations for logging or analytics.
   ///
@@ -157,6 +166,18 @@ class Syncache<T> {
       notifyWatchers: (key) => _notify(key, isFromCache: false),
       performInvalidations: _performMutationInvalidations,
     );
+
+    // Automatic mutation flush on reconnect: only possible when the
+    // network reports connectivity changes.
+    if (this.network is ReactiveNetwork) {
+      _connectivitySubscription = (this.network as ReactiveNetwork)
+          .onConnectivityChanged
+          .listen((online) {
+        if (online && !_isDisposed) {
+          unawaited(_mutationQueue.processQueue());
+        }
+      });
+    }
   }
 
   /// Notifies all observers, catching errors to prevent observer failures
@@ -846,15 +867,49 @@ class Syncache<T> {
   }
 
   /// Removes all pending mutations from the sync queue.
+  ///
+  /// The mutation currently syncing (if any) is allowed to finish, but no
+  /// further mutations are processed. Removed mutations' handles settle
+  /// with [MutationDiscarded].
   void clearPendingMutations() {
     _checkNotDisposed();
     _mutationQueue.clear();
   }
 
+  /// Removes the pending mutation with the given [id] from the sync queue.
+  ///
+  /// Returns `true` if a mutation with that id was found and removed, in
+  /// which case its handle settles with [MutationDiscarded]. The id is the
+  /// `PendingMutationInfo.id` exposed by [pendingMutationsSnapshot] and
+  /// [pendingMutationsStream].
+  ///
+  /// If the removed mutation was currently syncing, its request may still
+  /// reach the server — Syncache just stops tracking it.
+  bool removePendingMutation(String id) {
+    _checkNotDisposed();
+    return _mutationQueue.removeById(id);
+  }
+
   /// Removes the first pending mutation from the sync queue.
+  @Deprecated('Use removePendingMutation to remove a specific mutation')
   bool removeFirstPendingMutation() {
     _checkNotDisposed();
     return _mutationQueue.removeFirst();
+  }
+
+  /// Processes pending mutations now, without waiting for the next
+  /// `mutate()` call or a reconnect event.
+  ///
+  /// Mutations are normally processed automatically: immediately after
+  /// [mutate] when online, and when a [ReactiveNetwork] reports that the
+  /// device is back online. Call this to force a pass manually — e.g. after
+  /// login restores auth, or from a "Retry now" button in a sync banner.
+  ///
+  /// Safe to call repeatedly: while a processing pass is running (or the
+  /// network is offline) additional calls return immediately.
+  Future<void> processPendingMutations() async {
+    _checkNotDisposed();
+    await _mutationQueue.processQueue();
   }
 
   // ============================================================
@@ -1382,6 +1437,9 @@ class Syncache<T> {
   void dispose() {
     if (_isDisposed) return;
     _isDisposed = true;
+
+    unawaited(_connectivitySubscription?.cancel());
+    _connectivitySubscription = null;
 
     // Close all stream controllers
     for (final controller in _controllers.values) {

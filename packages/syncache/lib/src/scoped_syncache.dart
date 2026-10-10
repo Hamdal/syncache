@@ -261,5 +261,17 @@ class ScopedSyncache<T> {
   /// Clears mutations for ALL scopes.
   void clearPendingMutations() => _cache.clearPendingMutations();
 
+  /// Removes a pending mutation by id across ALL scopes.
+  /// See [Syncache.removePendingMutation].
+  bool removePendingMutation(String id) => _cache.removePendingMutation(id);
+
+  /// Removes the first pending mutation across ALL scopes.
+  @Deprecated('Use removePendingMutation to remove a specific mutation')
+  bool removeFirstPendingMutation() => _cache.removeFirstPendingMutation();
+
+  /// Processes pending mutations across ALL scopes.
+  /// See [Syncache.processPendingMutations].
+  Future<void> processPendingMutations() => _cache.processPendingMutations();
+
   Syncache<T> get cache => _cache;
 }

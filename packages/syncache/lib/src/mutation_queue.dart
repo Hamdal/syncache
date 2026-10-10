@@ -143,7 +143,7 @@ class MutationQueue<T> {
   void add(PendingMutation<T> mutation) {
     _pendingMutations.add(mutation);
     _notifyChanged();
-    _processQueue();
+    processQueue();
   }
 
   /// Clears pending mutations. The currently syncing mutation (if any)
@@ -220,7 +220,13 @@ class MutationQueue<T> {
     }
   }
 
-  Future<void> _processQueue() async {
+  /// Processes the pending mutation queue now.
+  ///
+  /// Idempotent: if a processing pass is already running (or the network
+  /// is offline) this returns immediately and the existing pass keeps
+  /// running. Used by [Syncache.processPendingMutations] and by the
+  /// automatic reconnect flush for [ReactiveNetwork] networks.
+  Future<void> processQueue() async {
     if (_isProcessingQueue || !network.isOnline) return;
     _isProcessingQueue = true;
 

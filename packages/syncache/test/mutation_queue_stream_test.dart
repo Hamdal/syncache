@@ -53,8 +53,7 @@ void main() {
         final sub = cache.pendingMutationsStream.listen(emissions.add);
         await Future<void>.delayed(const Duration(milliseconds: 20));
 
-        expect(emissions, isNotEmpty,
-            reason: 'late subscriber must be seeded');
+        expect(emissions, isNotEmpty, reason: 'late subscriber must be seeded');
         expect(emissions.first, hasLength(2));
         expect(
           emissions.first.map((m) => m.key),
@@ -195,8 +194,7 @@ void main() {
         await sub.cancel();
       });
 
-      test('late subscriber is seeded true when nothing is pending',
-          () async {
+      test('late subscriber is seeded true when nothing is pending', () async {
         await seedValue('k');
         await Future<void>.delayed(const Duration(milliseconds: 20));
 
