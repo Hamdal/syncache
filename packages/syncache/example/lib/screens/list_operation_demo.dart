@@ -463,7 +463,7 @@ class _ListOperationDemoScreenState extends State<ListOperationDemoScreen> {
     return ReorderableListView.builder(
       padding: const EdgeInsets.symmetric(vertical: 8),
       itemCount: _items!.length,
-      onReorder: (oldIndex, newIndex) {
+      onReorderItem: (oldIndex, newIndex) {
         // Could implement reorder via ListOperation
       },
       itemBuilder: (context, index) {

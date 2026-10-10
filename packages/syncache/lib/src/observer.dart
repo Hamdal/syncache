@@ -12,7 +12,7 @@
 /// ```dart
 /// class AnalyticsObserver extends SyncacheObserver {
 ///   @override
-///   void onFetchSuccess(String key, dynamic value, Duration duration) {
+///   void onFetchSuccess(String key, Duration duration) {
 ///     analytics.track('cache_fetch', {
 ///       'key': key,
 ///       'duration_ms': duration.inMilliseconds,
@@ -20,7 +20,7 @@
 ///   }
 ///
 ///   @override
-///   void onError(String key, Object error, StackTrace stackTrace) {
+///   void onFetchError(String key, Object error, StackTrace stackTrace) {
 ///     errorReporter.report(error, stackTrace);
 ///   }
 /// }
