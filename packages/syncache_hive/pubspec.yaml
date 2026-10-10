@@ -20,6 +20,14 @@ dependencies:
   syncache: ^0.2.0
   hive_ce: ^2.20.2
 
+# Local development: resolve the sibling package from this repository
+# instead of pub.dev. Committed (rather than using a pubspec_overrides.yaml)
+# so CI resolves the package without melos while `syncache` 0.2.0 is not yet
+# published. `pub publish` ignores dependency overrides.
+dependency_overrides:
+  syncache:
+    path: ../syncache
+
 dev_dependencies:
   lints: ^3.0.0
   test: ^1.24.0
