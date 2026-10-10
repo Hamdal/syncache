@@ -69,6 +69,20 @@ abstract class Store<T> {
 /// your store implementation. The [Syncache] class will automatically
 /// detect if your store supports tagging and enable tag operations.
 ///
+/// ## Tag lifecycle contract
+///
+/// All [TaggableStore] implementations must follow these rules so that tag
+/// behavior is identical regardless of the storage backend:
+///
+/// - [write] **preserves** any tags previously associated with the key.
+///   This matters because [Syncache.set] and mutation syncs use [write]:
+///   replacing a value must not silently detach the entry from its tag
+///   groups (e.g. an entry tagged `users` must remain reachable by
+///   `invalidateTag('users')` after an optimistic mutation).
+/// - [writeWithTags] **replaces** the tags for the key entirely. Passing an
+///   empty list clears all tags for the key.
+/// - [delete] and [clear] remove tag mappings together with the entries.
+///
 /// Example:
 /// ```dart
 /// // Store with tags
@@ -82,9 +96,12 @@ abstract class Store<T> {
 /// await cache.invalidateTag('calendar');
 /// ```
 abstract class TaggableStore<T> implements Store<T> {
-  /// Writes a [Stored] entry to the cache with the given [key] and optional [tags].
+  /// Writes a [Stored] entry to the cache with the given [key] and tags.
   ///
-  /// If an entry with the same key already exists, it is overwritten.
+  /// If an entry with the same key already exists, it is overwritten. The
+  /// given [tags] **replace** any previously associated tags; passing an
+  /// empty list clears all tags for the key.
+  ///
   /// Tags are used for group-based invalidation.
   Future<void> writeWithTags(String key, Stored<T> entry, List<String> tags);
 
