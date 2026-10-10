@@ -4,6 +4,7 @@ import 'cache_result.dart';
 import 'cancellation.dart';
 import 'fetcher.dart';
 import 'mutation.dart';
+import 'mutation_handle.dart';
 import 'pending_mutation_info.dart';
 import 'policy.dart';
 import 'prefetch.dart';
@@ -160,7 +161,7 @@ class ScopedSyncache<T> {
   }
 
   /// See [Syncache.mutate] for full documentation.
-  Future<void> mutate({
+  Future<MutationHandle<T>> mutate({
     required String key,
     required Mutation<T> mutation,
     List<String>? invalidates,

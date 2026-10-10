@@ -7,6 +7,7 @@ import 'fetch_engine.dart';
 import 'fetcher.dart';
 import 'metadata.dart';
 import 'mutation.dart';
+import 'mutation_handle.dart';
 import 'mutation_queue.dart';
 import 'network.dart';
 import 'observer.dart';
@@ -738,18 +739,28 @@ class Syncache<T> {
   /// Watchers of the [key] are notified of both the optimistic update
   /// and the eventual server confirmation.
   ///
-  /// Example:
+  /// Returns a [MutationHandle] for awaiting *this* mutation's server
+  /// confirmation. The returned future completes as soon as the optimistic
+  /// value is applied — it does not wait for the server. Use the handle to
+  /// await the outcome:
+  ///
   /// ```dart
-  /// await cache.mutate(
+  /// final handle = await cache.mutate(
   ///   key: 'user:123',
   ///   mutation: Mutation<User>(
   ///     apply: (user) => user.copyWith(name: 'New Name'),
-  ///     send: (user) async {
-  ///       final response = await api.updateUser(user);
-  ///       return User.fromJson(response);
-  ///     },
+  ///     send: (user) => api.updateUser(user),
   ///   ),
   /// );
+  ///
+  /// switch (await handle.outcome) {
+  ///   case MutationSuccess(:final serverValue):
+  ///     print('Server confirmed: $serverValue');
+  ///   case MutationFailure(:final error, :final retried):
+  ///     print('Failed after $retried retries: $error');
+  ///   case MutationDiscarded():
+  ///     print('Removed before syncing');
+  /// }
   /// ```
   ///
   /// You can also specify cache entries to invalidate after successful sync:
@@ -764,7 +775,7 @@ class Syncache<T> {
   /// ```
   ///
   /// Throws [CacheMissException] if no cached value exists for [key].
-  Future<void> mutate({
+  Future<MutationHandle<T>> mutate({
     required String key,
     required Mutation<T> mutation,
     List<String>? invalidates,
@@ -793,13 +804,15 @@ class Syncache<T> {
 
     unawaited(_notifyDependents(key));
 
-    _mutationQueue.add(PendingMutation(
+    final pending = PendingMutation(
       key: key,
       mutation: mutation,
       optimisticValue: optimisticValue,
       invalidates: invalidates,
       invalidateTags: invalidateTags,
-    ));
+    );
+    _mutationQueue.add(pending);
+    return pending.handle;
   }
 
   /// Returns the number of pending mutations.

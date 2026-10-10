@@ -8,6 +8,13 @@ export 'src/fetcher.dart'
 export 'src/memory_store.dart' show MemoryStore;
 export 'src/shared_memory_store.dart' show SharedMemoryStore;
 export 'src/mutation.dart' show Mutation;
+export 'src/mutation_handle.dart'
+    show
+        MutationHandle,
+        MutationOutcome,
+        MutationSuccess,
+        MutationFailure,
+        MutationDiscarded;
 export 'src/network.dart' show Network, AlwaysOnline;
 export 'src/observer.dart' show SyncacheObserver;
 export 'src/logging_observer.dart' show LoggingObserver;

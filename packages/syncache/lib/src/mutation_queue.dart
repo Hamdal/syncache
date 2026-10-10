@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'metadata.dart';
 import 'mutation.dart';
+import 'mutation_handle.dart';
 import 'network.dart';
 import 'observer.dart';
 import 'pending_mutation_info.dart';
@@ -29,6 +30,9 @@ class PendingMutation<T> {
   final List<String>? invalidates;
   final List<String>? invalidateTags;
 
+  final Completer<MutationOutcome<T>> _outcomeCompleter =
+      Completer<MutationOutcome<T>>();
+
   PendingMutation({
     required this.key,
     required this.mutation,
@@ -39,6 +43,18 @@ class PendingMutation<T> {
   })  : id = 'mut_${++_mutationIdCounter}',
         queuedAt = DateTime.now(),
         status = PendingMutationStatus.pending;
+
+  /// The handle callers receive from `Syncache.mutate`.
+  MutationHandle<T> get handle =>
+      MutationHandle<T>.fromCompleter(_outcomeCompleter);
+
+  /// Settles the handle exactly once; later settlement attempts are
+  /// ignored (e.g. a removed in-flight mutation whose send still succeeds).
+  void settle(MutationOutcome<T> outcome) {
+    if (!_outcomeCompleter.isCompleted) {
+      _outcomeCompleter.complete(outcome);
+    }
+  }
 
   PendingMutationInfo toInfo() {
     return PendingMutationInfo(
@@ -132,33 +148,66 @@ class MutationQueue<T> {
 
   /// Clears pending mutations. The currently syncing mutation (if any)
   /// will complete, but no further mutations will be processed after it.
+  ///
+  /// Every removed mutation's [MutationHandle] is settled with
+  /// [MutationDiscarded].
   void clear() {
+    final List<PendingMutation<T>> removed;
     // Keep only the in-flight mutation to avoid corrupting the processing loop
     if (_isProcessingQueue && _pendingMutations.isNotEmpty) {
       final current = _pendingMutations.first;
+      removed = _pendingMutations.sublist(1);
       _pendingMutations.clear();
       _pendingMutations.add(current);
     } else {
+      removed = _pendingMutations.toList();
       _pendingMutations.clear();
+    }
+    for (final mutation in removed) {
+      mutation.settle(MutationDiscarded<T>());
     }
     _notifyChanged();
   }
 
   /// Returns `true` if a mutation was removed, `false` if empty.
+  ///
+  /// Deprecated: use [removeById] to remove a specific mutation.
+  @Deprecated('Use removeById to remove a specific mutation')
   bool removeFirst() {
     if (_pendingMutations.isEmpty) return false;
-    _pendingMutations.removeAt(0);
+    final removed = _pendingMutations.removeAt(0);
+    removed.settle(MutationDiscarded<T>());
+    _notifyChanged();
+    return true;
+  }
+
+  /// Removes the pending mutation with the given [id] from the queue and
+  /// settles its handle with [MutationDiscarded].
+  ///
+  /// Returns `true` if a mutation with that id was found and removed.
+  /// If the removed mutation was currently syncing, its request may still
+  /// reach the server; Syncache simply stops tracking it.
+  bool removeById(String id) {
+    final index = _pendingMutations.indexWhere((m) => m.id == id);
+    if (index < 0) return false;
+    final removed = _pendingMutations.removeAt(index);
+    removed.settle(MutationDiscarded<T>());
     _notifyChanged();
     return true;
   }
 
   void dispose() {
+    // Settle every outstanding handle (including an in-flight mutation's)
+    // so callers awaiting MutationHandle.outcome are never left hanging.
+    for (final mutation in _pendingMutations) {
+      mutation.settle(MutationDiscarded<T>());
+    }
+    _pendingMutations.clear();
+    _isProcessingQueue = false;
     _pendingMutationsController?.close();
     _pendingMutationsController = null;
     _isSyncedController?.close();
     _isSyncedController = null;
-    _pendingMutations.clear();
-    _isProcessingQueue = false;
   }
 
   void _notifyChanged() {
@@ -214,7 +263,11 @@ class MutationQueue<T> {
         await notifyWatchers(pending.key);
         await performInvalidations(pending.invalidates, pending.invalidateTags);
 
-        _pendingMutations.removeAt(0);
+        // Remove by identity: if this mutation was removed from the queue
+        // while in flight, removing the first element would drop an
+        // unrelated mutation instead.
+        _pendingMutations.remove(pending);
+        pending.settle(MutationSuccess(serverValue));
         _notifyChanged();
       } catch (e, st) {
         pending.lastError = e;
@@ -227,9 +280,14 @@ class MutationQueue<T> {
           pending.status = PendingMutationStatus.failed;
           _notifyChanged();
 
-          _pendingMutations.removeAt(0);
+          _pendingMutations.remove(pending);
           notifyObservers((o) => o.onMutationRetryExhausted(
               pending.key, pending.retryCount + 1, e));
+          pending.settle(MutationFailure<T>(
+            error: e,
+            stackTrace: st,
+            retried: pending.retryCount,
+          ));
           _notifyChanged();
           continue;
         }
