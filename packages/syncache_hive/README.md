@@ -17,16 +17,16 @@ Add `syncache_hive` to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  syncache: ^0.1.0
-  syncache_hive: ^0.1.0
-  hive: ^2.2.0
+  syncache: ^0.1.2
+  syncache_hive: ^0.1.2
+  hive_ce: ^2.20.2
 ```
 
-For Flutter apps, also add `hive_flutter`:
+For Flutter apps, also add `hive_ce_flutter`:
 
 ```yaml
 dependencies:
-  hive_flutter: ^1.1.0
+  hive_ce_flutter: ^2.4.0
 ```
 
 ## Usage
@@ -34,7 +34,7 @@ dependencies:
 ### Basic Setup
 
 ```dart
-import 'package:hive/hive.dart';
+import 'package:hive_ce/hive_ce.dart';
 import 'package:syncache/syncache.dart';
 import 'package:syncache_hive/syncache_hive.dart';
 
@@ -64,7 +64,7 @@ void main() async {
 
 ```dart
 import 'package:flutter/material.dart';
-import 'package:hive_flutter/hive_flutter.dart';
+import 'package:hive_ce_flutter/hive_ce_flutter.dart';
 import 'package:syncache/syncache.dart';
 import 'package:syncache_hive/syncache_hive.dart';
 

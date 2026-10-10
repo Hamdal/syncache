@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:hive/hive.dart';
+import 'package:hive_ce/hive_ce.dart';
 import 'package:syncache/syncache.dart';
 
 /// A Hive-backed implementation of [TaggableStore].
@@ -39,7 +39,7 @@ import 'package:syncache/syncache.dart';
 /// ## Example
 ///
 /// ```dart
-/// import 'package:hive/hive.dart';
+/// import 'package:hive_ce/hive_ce.dart';
 /// import 'package:syncache/syncache.dart';
 /// import 'package:syncache_hive/syncache_hive.dart';
 ///
@@ -62,7 +62,7 @@ import 'package:syncache/syncache.dart';
 ///
 /// ## Flutter Usage
 ///
-/// For Flutter apps, use `hive_flutter` package and initialize with:
+/// For Flutter apps, use `hive_ce_flutter` package and initialize with:
 /// ```dart
 /// await Hive.initFlutter();
 /// ```
@@ -206,7 +206,11 @@ class HiveStore<T> implements TaggableStore<T> {
   @override
   Future<void> write(String key, Stored<T> entry) {
     return _withOperation(() async {
-      final data = _serializeEntry(entry, tags: []);
+      // Preserve tags from any existing entry: a plain write replaces the
+      // value but must not detach the key from its tag groups (see the
+      // TaggableStore tag lifecycle contract).
+      final existingTags = _extractTags(_box.get(key) ?? const {});
+      final data = _serializeEntry(entry, tags: existingTags);
       await _box.put(key, data);
     });
   }
