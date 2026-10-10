@@ -478,6 +478,23 @@ class Syncache<T> {
   /// When all listeners unsubscribe, the stream controller is closed
   /// and removed.
   ///
+  /// ## Invalidation semantics
+  ///
+  /// Invalidation ([invalidate], [invalidateTag], [invalidatePattern],
+  /// [clear]) does **not** close this stream. Instead the watcher is
+  /// refetched with the fetch/policy/ttl it was created with:
+  ///
+  /// - Refetch success → the fresh value is emitted.
+  /// - Refetch failure → the error is emitted and the stream remains
+  ///   usable.
+  /// - [Policy.cacheOnly] watchers receive a [CacheMissException] (their
+  ///   entry was deleted) as a stream error, without closing.
+  ///
+  /// Listeners keep receiving the last value until the refetch completes
+  /// (stale-while-invalidated). The stream only completes
+  /// ([ConnectionState.done]) when every listener unsubscribes or the
+  /// cache is disposed.
+  ///
   /// Example:
   /// ```dart
   /// final subscription = cache.watch(
@@ -541,6 +558,10 @@ class Syncache<T> {
   /// Similar to [watch], but emits [CacheResult] objects that include
   /// metadata about whether the data came from cache, its freshness,
   /// and when it was stored.
+  ///
+  /// Like [watch], invalidation refetches this stream instead of closing
+  /// it: listeners keep the last [CacheResult] until the refetch emits.
+  /// See [watch] for the full contract.
   ///
   /// Example:
   /// ```dart
@@ -636,6 +657,9 @@ class Syncache<T> {
   /// 1. The initial value (fetched or from cache)
   /// 2. Updates whenever the key itself changes
   /// 3. Refetched values whenever any dependency key changes
+  ///
+  /// Like [watch], invalidation of this key refetches the stream instead
+  /// of closing it. See [watch] for the full contract.
   ///
   /// When all listeners unsubscribe, the dependency tracking is cleaned up.
   ///
@@ -826,8 +850,19 @@ class Syncache<T> {
 
   /// Invalidates (deletes) the cached entry for the given [key].
   ///
-  /// Any active watchers for the key will have their streams closed.
-  /// The next [get] or [watch] call will fetch fresh data.
+  /// Active watchers of the key stay open: each is refetched using its own
+  /// fetch/policy/ttl and receives the fresh value when the refetch
+  /// completes. Until then listeners keep seeing the last value
+  /// (stale-while-invalidated).
+  ///
+  /// If the refetch fails, the error is emitted on the stream and the
+  /// stream remains usable — invalidate again (or restore connectivity) to
+  /// retry. [Policy.cacheOnly] watchers cannot recover from a deleted
+  /// entry and receive a [CacheMissException] as a stream error, also
+  /// without closing the stream.
+  ///
+  /// The stream only completes (ConnectionState.done) when the watcher is
+  /// unsubscribed or the cache is disposed.
   ///
   /// Example:
   /// ```dart
@@ -837,7 +872,7 @@ class Syncache<T> {
     _checkNotDisposed();
     await store.delete(key);
     _notifyObservers((o) => o.onInvalidate(key));
-    _notifyRemoval(key);
+    await _refetchWatchers([key]);
   }
 
   /// Invalidates all cache entries with the specified [tag].
@@ -845,7 +880,8 @@ class Syncache<T> {
   /// Requires the store to implement [TaggableStore].
   /// If the store doesn't support tagging, this method does nothing.
   ///
-  /// All watchers for affected entries will have their streams closed.
+  /// Active watchers of affected entries stay open and are refetched (see
+  /// [invalidate] for the exact stream semantics).
   ///
   /// Example:
   /// ```dart
@@ -869,14 +905,15 @@ class Syncache<T> {
 
     for (final key in keys) {
       _notifyObservers((o) => o.onInvalidate(key));
-      _notifyRemoval(key);
     }
+    await _refetchWatchers(keys);
   }
 
   /// Invalidates all cache entries that have any of the specified [tags].
   ///
   /// If [matchAll] is true, only entries with ALL tags are invalidated.
-  /// Requires [TaggableStore].
+  /// Requires [TaggableStore]. Active watchers of affected entries stay
+  /// open and are refetched (see [invalidate]).
   Future<void> invalidateTags(List<String> tags,
       {bool matchAll = false}) async {
     _checkNotDisposed();
@@ -903,14 +940,17 @@ class Syncache<T> {
 
     for (final key in keysToNotify) {
       _notifyObservers((o) => o.onInvalidate(key));
-      _notifyRemoval(key);
     }
+    await _refetchWatchers(keysToNotify);
   }
 
   /// Invalidates all cache entries whose keys match the given glob [pattern].
   ///
   /// Requires the store to implement [TaggableStore].
   /// If the store doesn't support pattern matching, this method does nothing.
+  ///
+  /// Active watchers of affected entries stay open and are refetched (see
+  /// [invalidate] for the exact stream semantics).
   ///
   /// Supports simple glob patterns:
   /// - `*` matches any characters
@@ -924,7 +964,16 @@ class Syncache<T> {
   /// // Invalidate entries for a specific date pattern
   /// await cache.invalidatePattern('events:2024-03-*');
   /// ```
-  Future<void> invalidatePattern(String pattern) async {
+  Future<void> invalidatePattern(String pattern) {
+    return _invalidatePattern(pattern, refetchWatchers: true);
+  }
+
+  /// Shared pattern-invalidation implementation. [refetchWatchers] is false
+  /// for scope clears that opt out of refetching (see [clearScope]).
+  Future<void> _invalidatePattern(
+    String pattern, {
+    required bool refetchWatchers,
+  }) async {
     _checkNotDisposed();
     if (store is! TaggableStore<T>) return;
 
@@ -934,19 +983,35 @@ class Syncache<T> {
 
     for (final key in keys) {
       _notifyObservers((o) => o.onInvalidate(key));
-      _notifyRemoval(key);
+    }
+    if (refetchWatchers) {
+      await _refetchWatchers(keys);
     }
   }
 
   /// Clears all cached entries.
-  Future<void> clear() async {
+  ///
+  /// By default every active watcher is refetched afterwards, exactly like
+  /// [invalidate] does per key (streams stay open, listeners keep the last
+  /// value until the refetch completes). Pass `refetchWatchers: false` for
+  /// bulk wipes and tests where refetching everything is undesired: the
+  /// streams then stay open and silent instead.
+  ///
+  /// ```dart
+  /// // Logout: wipe everything and let watchers reload
+  /// await cache.clear();
+  ///
+  /// // Bulk wipe without triggering a refill storm
+  /// await cache.clear(refetchWatchers: false);
+  /// ```
+  Future<void> clear({bool refetchWatchers = true}) async {
     _checkNotDisposed();
     await store.clear();
     _notifyObservers((o) => o.onClear());
+    if (!refetchWatchers) return;
+
     final allKeys = {..._controllers.keys, ..._metaControllers.keys};
-    for (final key in allKeys) {
-      _notifyRemoval(key);
-    }
+    await _refetchWatchers(allKeys);
   }
 
   // ============================================================
@@ -979,10 +1044,13 @@ class Syncache<T> {
 
   /// Clears all cached entries within a scope.
   ///
+  /// By default, active watchers of affected entries are refetched and
+  /// their streams stay open — the same semantics as [clear]. Pass
+  /// `refetchWatchers: false` to wipe silently without refetching.
+  ///
   /// Requires [TaggableStore] for pattern matching.
-  Future<void> clearScope(String scope) async {
-    _checkNotDisposed();
-    await invalidatePattern('$scope:*');
+  Future<void> clearScope(String scope, {bool refetchWatchers = true}) {
+    return _invalidatePattern('$scope:*', refetchWatchers: refetchWatchers);
   }
 
   /// Invalidates entries within a scope matching a pattern.
@@ -1430,17 +1498,71 @@ class Syncache<T> {
     }
   }
 
-  /// Notifies watchers that a key has been removed.
-  void _notifyRemoval(String key) {
-    final controller = _controllers[key];
-    if (controller != null && !controller.isClosed) {
-      controller.close();
-      _controllers.remove(key);
+  /// Refetches every active watcher of the given [keys] after their entries
+  /// were invalidated.
+  ///
+  /// Each watcher is refetched with its own fetch/policy/ttl. Successful
+  /// refetches are emitted through the regular notification path; failures
+  /// are emitted as stream errors while keeping every stream open.
+  Future<void> _refetchWatchers(Iterable<String> keys) async {
+    for (final key in keys) {
+      final valueRegistration = _watchers[key];
+      if (valueRegistration != null) {
+        await _refetchValueWatcher(valueRegistration);
+      }
+
+      final metaRegistration = _metaWatchers[key];
+      if (metaRegistration != null) {
+        await _refetchMetaWatcher(metaRegistration);
+      }
     }
-    final metaController = _metaControllers[key];
-    if (metaController != null && !metaController.isClosed) {
-      metaController.close();
-      _metaControllers.remove(key);
+  }
+
+  /// Refetches a single value watcher after invalidation.
+  ///
+  /// The stream stays open in all cases: the refetched value is emitted on
+  /// success, the error on failure. A [Policy.cacheOnly] watcher therefore
+  /// receives a [CacheMissException] (its entry was just deleted and it
+  /// never goes to the network) without closing.
+  Future<void> _refetchValueWatcher(_WatchRegistration<T> registration) async {
+    final controller = _controllers[registration.key];
+    if (controller == null || controller.isClosed) return;
+
+    try {
+      await get(
+        key: registration.key,
+        fetch: registration.fetch,
+        policy: registration.policy,
+        ttl: registration.ttl,
+      );
+    } catch (error) {
+      if (!controller.isClosed) {
+        controller.addError(error);
+      }
+    }
+  }
+
+  /// Refetches a single metadata watcher after invalidation.
+  ///
+  /// Mirrors [_refetchValueWatcher] but emits a full [CacheResult].
+  Future<void> _refetchMetaWatcher(_WatchRegistration<T> registration) async {
+    final controller = _metaControllers[registration.key];
+    if (controller == null || controller.isClosed) return;
+
+    try {
+      final result = await getWithMeta(
+        key: registration.key,
+        fetch: registration.fetch,
+        policy: registration.policy,
+        ttl: registration.ttl,
+      );
+      if (!controller.isClosed) {
+        controller.add(result);
+      }
+    } catch (error) {
+      if (!controller.isClosed) {
+        controller.addError(error);
+      }
     }
   }
 

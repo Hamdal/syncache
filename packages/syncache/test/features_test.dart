@@ -445,30 +445,35 @@ void main() {
         expect(await store.read('user:1'), isNotNull);
       });
 
-      test('closes watchers for invalidated entries', () async {
+      test('refetches watchers for invalidated entries and keeps them open',
+          () async {
         await cache.get(
           key: 'event:1',
           fetch: (_) async => 'event-1',
           tags: ['events'],
         );
 
+        var serverValue = 'event-1';
+        final values = <String>[];
         var streamClosed = false;
         final stream = cache.watch(
           key: 'event:1',
-          fetch: (_) async => 'event-1',
+          fetch: (_) async => serverValue,
         );
 
         stream.listen(
-          (_) {},
+          values.add,
           onDone: () => streamClosed = true,
         );
 
         await Future<void>.delayed(const Duration(milliseconds: 50));
 
+        serverValue = 'event-1-fresh';
         await cache.invalidateTag('events');
 
         await Future<void>.delayed(const Duration(milliseconds: 50));
-        expect(streamClosed, isTrue);
+        expect(values.last, 'event-1-fresh');
+        expect(streamClosed, isFalse);
       });
     });
 

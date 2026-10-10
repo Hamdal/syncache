@@ -421,5 +421,45 @@ void main() {
 
       expect(observer!.watcherCount, 0);
     });
+
+    testWidgets('survives cache invalidation without done state',
+        (tester) async {
+      // Real cache so that invalidate() actually drives the refetch.
+      final store = MemoryStore<String>();
+      final cache = Syncache<String>(store: store);
+      addTearDown(cache.dispose);
+
+      var serverValue = 'v1';
+      final states = <ConnectionState>[];
+
+      await tester.pumpWidget(
+        testableWidget(
+          CacheBuilder<String>(
+            cache: cache,
+            cacheKey: 'user:1',
+            fetch: (req) async => serverValue,
+            builder: (context, snapshot) {
+              states.add(snapshot.connectionState);
+              if (snapshot.hasData) {
+                return Text(snapshot.data!);
+              }
+              return const Text('loading');
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('v1'), findsOneWidget);
+
+      serverValue = 'v2';
+      await cache.invalidate('user:1');
+      await tester.pumpAndSettle();
+
+      // The refetched value is displayed and the widget never saw done.
+      expect(find.text('v2'), findsOneWidget);
+      expect(states, isNot(contains(ConnectionState.done)));
+      expect(states.last, ConnectionState.active);
+    });
   });
 }

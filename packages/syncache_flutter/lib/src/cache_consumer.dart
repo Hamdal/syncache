@@ -67,6 +67,11 @@ class CacheConsumer<T> extends StatefulWidget {
   final Fetcher<T> fetch;
 
   /// Builder function called with the latest snapshot.
+  ///
+  /// Note: invalidation (including `invalidate()`, `invalidateTag()`, and
+  /// `clear()`) does not end the subscription — the widget is refetched and
+  /// keeps rebuilding. [ConnectionState.done] only occurs after the widget
+  /// is disposed (or the underlying cache is disposed).
   final Widget Function(BuildContext context, AsyncSnapshot<T> snapshot)
       builder;
 

@@ -198,8 +198,12 @@ class ScopedSyncache<T> {
   }
 
   /// Clears all cached entries within this scope.
-  Future<void> clear() {
-    return _cache.clearScope(scope);
+  ///
+  /// By default active watchers are refetched and their streams stay open
+  /// (see [Syncache.clear]); pass `refetchWatchers: false` to wipe without
+  /// triggering refetches.
+  Future<void> clear({bool refetchWatchers = true}) {
+    return _cache.clearScope(scope, refetchWatchers: refetchWatchers);
   }
 
   /// See [Syncache.prefetch] for full documentation.
