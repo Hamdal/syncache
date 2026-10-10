@@ -131,8 +131,7 @@ void main() {
 
       when(() => mockNetwork.onConnectivityChanged)
           .thenAnswer((_) => connectivityController.stream);
-      when(() => mockCache.processPendingMutations())
-          .thenAnswer((_) async {});
+      when(() => mockCache.processPendingMutations()).thenAnswer((_) async {});
     });
 
     tearDown(() {

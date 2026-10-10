@@ -8,7 +8,7 @@ Syncache provides a unified API for caching data with multiple strategies, react
 
 ```yaml
 dependencies:
-  syncache: ^0.1.2
+  syncache: ^0.2.0
 ```
 
 ## Quick Start
@@ -91,6 +91,51 @@ await cache.mutate(
 ```
 
 Failed mutations are automatically queued and retried when the network becomes available.
+
+> **Scope of the promise (0.2.0):** the retry runs *in-process*. When your
+> `Network` implements `ReactiveNetwork` — `syncache_flutter`'s
+> `FlutterNetwork` does — queued mutations are flushed automatically the
+> moment connectivity returns, with no new `mutate()` call. Mutations are not
+> yet persisted across app restarts; durable outbox semantics land in 0.3.0.
+
+### What happens when connectivity returns
+
+With a `ReactiveNetwork` connected (for Flutter apps, just pass
+`FlutterNetwork()` to your `Syncache`), the reconnect sequence is:
+
+1. Queued mutations are sent to the server automatically, in order, and the
+   cache is updated with each confirmed server value.
+2. Watchers of keys invalidated by a mutation (`invalidates:` /
+   `invalidateTags:`) refetch with their own parameters — streams stay open
+   and their listeners keep the last value until fresh data arrives.
+3. In `syncache_flutter`, `SyncacheLifecycleObserver` also refreshes watched
+   keys on reconnect (configurable via `LifecycleConfig.refetchOnReconnect`).
+
+You can also trigger a pass manually, e.g. from a "Retry now" button:
+
+```dart
+await cache.processPendingMutations();
+```
+
+Queue visibility for sync indicators is fully reactive — late subscribers are
+seeded with the current state:
+
+```dart
+cache.pendingMutationsStream.listen((pending) {
+  showSyncBanner(pending.isNotEmpty);
+});
+
+// Await a specific mutation's server confirmation:
+final handle = await cache.mutate(key: 'todo:1', mutation: mutation);
+switch (await handle.outcome) {
+  case MutationSuccess(:final serverValue):
+    // Server confirmed; the cache holds the server value.
+  case MutationFailure(:final error, :final retried):
+    // Retries exhausted; the optimistic value remains cached.
+  case MutationDiscarded():
+    // Removed via clearPendingMutations / removePendingMutation / dispose.
+}
+```
 
 ### Tag-Based Invalidation
 
