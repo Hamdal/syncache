@@ -261,7 +261,7 @@ void main() {
           ),
         ));
 
-        await Future.delayed(const Duration(milliseconds: 10));
+        await Future<void>.delayed(const Duration(milliseconds: 10));
 
         expect(observer.events, contains('mutation_start:mutate-key'));
       });
@@ -283,7 +283,7 @@ void main() {
           ),
         );
 
-        await Future.delayed(const Duration(milliseconds: 50));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
 
         expect(observer.events, contains('mutation_success:sync-key'));
       });
@@ -305,7 +305,7 @@ void main() {
           ),
         );
 
-        await Future.delayed(const Duration(milliseconds: 50));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
 
         expect(
           observer.events,
@@ -330,7 +330,7 @@ void main() {
           ),
         ));
 
-        await Future.delayed(const Duration(milliseconds: 10));
+        await Future<void>.delayed(const Duration(milliseconds: 10));
 
         expect(observer.events, contains('store:store-mutate-key'));
       });

@@ -217,7 +217,7 @@ class MutationQueue<T> {
             o.onMutationRetry(pending.key, pending.retryCount, e, delay));
 
         pending.retryCount++;
-        await Future.delayed(delay);
+        await Future<void>.delayed(delay);
 
         if (!network.isOnline) {
           pending.status = PendingMutationStatus.pending;

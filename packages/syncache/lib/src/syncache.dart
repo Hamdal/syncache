@@ -722,9 +722,9 @@ class Syncache<T> {
 
     await store.write(key, Stored(value: optimisticValue, meta: newMeta));
     _notifyObservers((o) => o.onStore(key));
-    _notify(key, isFromCache: false);
+    unawaited(_notify(key, isFromCache: false));
 
-    _notifyDependents(key);
+    unawaited(_notifyDependents(key));
 
     _mutationQueue.add(PendingMutation(
       key: key,
@@ -1421,7 +1421,7 @@ class Syncache<T> {
         if (cached == null) {
           throw CacheMissException(key);
         }
-        if (!skipNotify) _notify(key, isFromCache: true);
+        if (!skipNotify) unawaited(_notify(key, isFromCache: true));
         return strategy.wrapCached(cached, isStale: cached.meta.isExpired);
 
       case Policy.networkOnly:
@@ -1433,7 +1433,7 @@ class Syncache<T> {
           cancel,
           tags,
         );
-        if (!skipNotify) _notify(key, isFromCache: false);
+        if (!skipNotify) unawaited(_notify(key, isFromCache: false));
         return result;
 
       case Policy.refresh:
@@ -1446,21 +1446,21 @@ class Syncache<T> {
             cancel,
             tags,
           );
-          if (!skipNotify) _notify(key, isFromCache: false);
+          if (!skipNotify) unawaited(_notify(key, isFromCache: false));
           return result;
         }
         final cached = await store.read(key);
         if (cached == null) {
           throw CacheMissException(key);
         }
-        if (!skipNotify) _notify(key, isFromCache: true);
+        if (!skipNotify) unawaited(_notify(key, isFromCache: true));
         return strategy.wrapCached(cached, isStale: cached.meta.isExpired);
 
       case Policy.offlineFirst:
         final cached = await store.read(key);
         if (cached != null && !cached.meta.isExpired) {
           _notifyObservers((o) => o.onCacheHit(key));
-          if (!skipNotify) _notify(key, isFromCache: true);
+          if (!skipNotify) unawaited(_notify(key, isFromCache: true));
           return strategy.wrapCached(cached, isStale: false);
         }
 
@@ -1476,7 +1476,7 @@ class Syncache<T> {
               cancel,
               tags,
             );
-            if (!skipNotify) _notify(key, isFromCache: false);
+            if (!skipNotify) unawaited(_notify(key, isFromCache: false));
             return result;
           } on CancelledException {
             rethrow;
@@ -1485,7 +1485,7 @@ class Syncache<T> {
               throw CacheMissException(key);
             }
             if (cached != null) {
-              if (!skipNotify) _notify(key, isFromCache: true);
+              if (!skipNotify) unawaited(_notify(key, isFromCache: true));
               return strategy.wrapCached(cached,
                   isStale: cached.meta.isExpired);
             }
@@ -1494,7 +1494,7 @@ class Syncache<T> {
         }
 
         if (cached != null) {
-          if (!skipNotify) _notify(key, isFromCache: true);
+          if (!skipNotify) unawaited(_notify(key, isFromCache: true));
           return strategy.wrapCached(cached, isStale: cached.meta.isExpired);
         }
 
@@ -1550,16 +1550,16 @@ class Syncache<T> {
           network.isOnline && (!refreshOnlyIfExpired || cached.meta.isExpired);
 
       if (shouldRefresh) {
-        strategy
+        unawaited(strategy
             .backgroundRefresh(_fetchEngine, key, ttl, retry, tags)
             .then((_) {
-          _notify(key, isFromCache: false);
+          unawaited(_notify(key, isFromCache: false));
         }).catchError((Object e, StackTrace st) {
           _notifyObservers((o) => o.onFetchError(key, e, st));
-        });
+        }));
       }
 
-      if (!skipNotify) _notify(key, isFromCache: true);
+      if (!skipNotify) unawaited(_notify(key, isFromCache: true));
       return strategy.wrapCached(cached, isStale: cached.meta.isExpired);
     }
 
@@ -1574,7 +1574,7 @@ class Syncache<T> {
         cancel,
         tags,
       );
-      if (!skipNotify) _notify(key, isFromCache: false);
+      if (!skipNotify) unawaited(_notify(key, isFromCache: false));
       return result;
     }
 

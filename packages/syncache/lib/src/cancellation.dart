@@ -162,8 +162,7 @@ class CancellationToken {
 /// ```
 class CancelledException extends SyncacheException {
   /// Creates a cancellation exception with an optional [message].
-  const CancelledException([String message = 'Operation was cancelled'])
-      : super(message);
+  const CancelledException([super.message = 'Operation was cancelled']);
 
   @override
   String toString() => 'CancelledException: $message';

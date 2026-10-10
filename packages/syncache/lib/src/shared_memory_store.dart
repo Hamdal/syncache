@@ -132,8 +132,7 @@ class SharedMemoryStore<T> implements TaggableStore<T> {
   @override
   Future<void> deleteByPattern(String pattern) async {
     final regex = _patternToRegex(pattern);
-    final keysToDelete =
-        _cache.keys.where((key) => regex.hasMatch(key)).toList();
+    final keysToDelete = _cache.keys.where(regex.hasMatch).toList();
     for (final key in keysToDelete) {
       _cache.remove(key);
       _tags.remove(key);
@@ -143,7 +142,7 @@ class SharedMemoryStore<T> implements TaggableStore<T> {
   @override
   Future<List<String>> getKeysByPattern(String pattern) async {
     final regex = _patternToRegex(pattern);
-    return _cache.keys.where((key) => regex.hasMatch(key)).toList();
+    return _cache.keys.where(regex.hasMatch).toList();
   }
 
   RegExp _patternToRegex(String pattern) {

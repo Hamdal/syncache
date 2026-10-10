@@ -131,6 +131,34 @@ class ScopedSyncache<T> {
     );
   }
 
+  /// See [Syncache.watchWithDependencies] for full documentation.
+  ///
+  /// Both [key] and the keys in [refetchWhen] are automatically scoped.
+  Stream<T> watchWithDependencies({
+    required String key,
+    required Fetcher<T> fetch,
+    required List<String> refetchWhen,
+    Policy policy = Policy.offlineFirst,
+    Duration? ttl,
+  }) {
+    return _cache.watchWithDependencies(
+      key: _scopedKey(key),
+      fetch: fetch,
+      refetchWhen: refetchWhen.map(_scopedKey).toList(),
+      policy: policy,
+      ttl: ttl,
+    );
+  }
+
+  /// See [Syncache.set] for full documentation.
+  Future<void> set({
+    required String key,
+    required T value,
+    Duration? ttl,
+  }) {
+    return _cache.set(key: _scopedKey(key), value: value, ttl: ttl);
+  }
+
   /// See [Syncache.mutate] for full documentation.
   Future<void> mutate({
     required String key,
@@ -182,6 +210,7 @@ class ScopedSyncache<T> {
               fetch: r.fetch,
               policy: r.policy,
               ttl: r.ttl,
+              retry: r.retry,
             ))
         .toList();
 
@@ -194,12 +223,14 @@ class ScopedSyncache<T> {
     required Fetcher<T> fetch,
     Policy policy = Policy.refresh,
     Duration? ttl,
+    RetryConfig? retry,
   }) {
     return _cache.prefetchOne(
       key: _scopedKey(key),
       fetch: fetch,
       policy: policy,
       ttl: ttl,
+      retry: retry,
     );
   }
 

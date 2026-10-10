@@ -173,7 +173,7 @@ void main() {
           key: 'key-1',
           fetch: (_) async {
             fetchCount++;
-            await Future.delayed(const Duration(milliseconds: 10));
+            await Future<void>.delayed(const Duration(milliseconds: 10));
             return 'value-1';
           },
           policy: Policy.networkOnly,
@@ -183,7 +183,7 @@ void main() {
           key: 'key-2',
           fetch: (_) async {
             fetchCount++;
-            await Future.delayed(const Duration(milliseconds: 10));
+            await Future<void>.delayed(const Duration(milliseconds: 10));
             return 'value-2';
           },
           policy: Policy.networkOnly,
@@ -242,7 +242,7 @@ void main() {
           throwsA(isA<Exception>()),
         );
 
-        await Future.delayed(const Duration(milliseconds: 10));
+        await Future<void>.delayed(const Duration(milliseconds: 10));
         expect(fetchCount, equals(1));
 
         // Second request should be able to fetch (not blocked by first failure)
@@ -329,7 +329,7 @@ void main() {
 
         // Complete background refresh
         completer.complete('fresh-value');
-        await Future.delayed(const Duration(milliseconds: 50));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
 
         // Should have only triggered one background fetch
         expect(fetchCount, equals(1));
@@ -361,7 +361,7 @@ void main() {
         final subscription = stream.listen(values.add);
 
         // Wait for initial emission
-        await Future.delayed(const Duration(milliseconds: 50));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
 
         // Update cache directly via another get with networkOnly
         await cache.get(
@@ -370,7 +370,7 @@ void main() {
           policy: Policy.networkOnly,
         );
 
-        await Future.delayed(const Duration(milliseconds: 50));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
         await subscription.cancel();
 
         expect(values, contains('initial'));
@@ -439,7 +439,7 @@ void main() {
         ));
 
         // Allow the mutation to apply optimistically
-        await Future.delayed(const Duration(milliseconds: 10));
+        await Future<void>.delayed(const Duration(milliseconds: 10));
 
         // Value should be optimistically updated
         final cached = await store.read('mutate-key');
@@ -487,7 +487,7 @@ void main() {
           ),
         ));
 
-        await Future.delayed(const Duration(milliseconds: 10));
+        await Future<void>.delayed(const Duration(milliseconds: 10));
 
         // Cache should now be "B"
         var cached = await store.read('concurrent-key');
@@ -502,7 +502,7 @@ void main() {
           ),
         ));
 
-        await Future.delayed(const Duration(milliseconds: 10));
+        await Future<void>.delayed(const Duration(milliseconds: 10));
 
         // Cache should now be "BC"
         cached = await store.read('concurrent-key');
@@ -512,7 +512,7 @@ void main() {
         // The fix should re-apply Mutation 2's apply on top of this
         sendCompleter1.complete('B_server');
 
-        await Future.delayed(const Duration(milliseconds: 50));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
 
         // Cache should be "B_serverC" (server value + mutation 2 re-applied)
         cached = await store.read('concurrent-key');
@@ -521,7 +521,7 @@ void main() {
         // Mutation 2 completes
         sendCompleter2.complete('final_server');
 
-        await Future.delayed(const Duration(milliseconds: 50));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
 
         // Cache should be the final server value
         cached = await store.read('concurrent-key');
@@ -553,7 +553,7 @@ void main() {
             ),
           ));
 
-          await Future.delayed(const Duration(milliseconds: 5));
+          await Future<void>.delayed(const Duration(milliseconds: 5));
         }
 
         // After 3 toggles from OFF: ON -> OFF -> ON
@@ -563,7 +563,7 @@ void main() {
 
         // Complete first toggle (OFF -> ON) with server value "ON"
         completers[0].complete('ON');
-        await Future.delayed(const Duration(milliseconds: 50));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
 
         // After first send completes, re-apply remaining toggles:
         // ON (server) -> OFF (toggle 2) -> ON (toggle 3) = ON
@@ -572,7 +572,7 @@ void main() {
 
         // Complete second toggle
         completers[1].complete('OFF');
-        await Future.delayed(const Duration(milliseconds: 50));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
 
         // After second send completes, re-apply remaining toggle:
         // OFF (server) -> ON (toggle 3) = ON
@@ -581,7 +581,7 @@ void main() {
 
         // Complete third toggle
         completers[2].complete('ON');
-        await Future.delayed(const Duration(milliseconds: 50));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
 
         // Final state should be ON
         cached = await store.read('toggle-key');
@@ -617,7 +617,7 @@ void main() {
           ),
         ));
 
-        await Future.delayed(const Duration(milliseconds: 10));
+        await Future<void>.delayed(const Duration(milliseconds: 10));
 
         // Mutate key-2
         unawaited(cache.mutate(
@@ -628,7 +628,7 @@ void main() {
           ),
         ));
 
-        await Future.delayed(const Duration(milliseconds: 10));
+        await Future<void>.delayed(const Duration(milliseconds: 10));
 
         // Both should have optimistic values
         expect((await store.read('key-1'))!.value, equals('B1'));
@@ -636,7 +636,7 @@ void main() {
 
         // Complete key-1 mutation
         completer1.complete('C1');
-        await Future.delayed(const Duration(milliseconds: 50));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
 
         // key-1 should have server value, key-2 should be unchanged
         expect((await store.read('key-1'))!.value, equals('C1'));
@@ -644,7 +644,7 @@ void main() {
 
         // Complete key-2 mutation
         completer2.complete('C2');
-        await Future.delayed(const Duration(milliseconds: 50));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
 
         // Both should have final server values
         expect((await store.read('key-1'))!.value, equals('C1'));
@@ -679,7 +679,7 @@ void main() {
           ),
         ));
 
-        await Future.delayed(const Duration(milliseconds: 10));
+        await Future<void>.delayed(const Duration(milliseconds: 10));
 
         // Mutation 2: will succeed
         unawaited(noRetryCache.mutate(
@@ -690,7 +690,7 @@ void main() {
           ),
         ));
 
-        await Future.delayed(const Duration(milliseconds: 10));
+        await Future<void>.delayed(const Duration(milliseconds: 10));
 
         // Optimistic state should be "BC"
         var cached = await store.read('fail-key');
@@ -698,7 +698,7 @@ void main() {
 
         // Fail mutation 1 - it gets removed but cache keeps optimistic value
         failCompleter.completeError(Exception('Network error'));
-        await Future.delayed(const Duration(milliseconds: 50));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
 
         // Cache still has "BC" (optimistic values are not rolled back on failure)
         // Mutation 2 will still try to send its optimistic value
@@ -711,7 +711,7 @@ void main() {
         // mutation 1 failed, there's no server state update. Mutation 2
         // sends its current optimisticValue and the server returns 'final'.
         successCompleter.complete('final');
-        await Future.delayed(const Duration(milliseconds: 50));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
 
         // Final state from server
         cached = await store.read('fail-key');
@@ -735,7 +735,7 @@ void main() {
             )
             .listen(values.add);
 
-        await Future.delayed(const Duration(milliseconds: 50));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
 
         final completer1 = Completer<String>();
         final completer2 = Completer<String>();
@@ -749,7 +749,7 @@ void main() {
           ),
         ));
 
-        await Future.delayed(const Duration(milliseconds: 20));
+        await Future<void>.delayed(const Duration(milliseconds: 20));
 
         // Mutation 2
         unawaited(cache.mutate(
@@ -760,14 +760,14 @@ void main() {
           ),
         ));
 
-        await Future.delayed(const Duration(milliseconds: 20));
+        await Future<void>.delayed(const Duration(milliseconds: 20));
 
         // Complete both mutations
         completer1.complete('server1');
-        await Future.delayed(const Duration(milliseconds: 50));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
 
         completer2.complete('server2');
-        await Future.delayed(const Duration(milliseconds: 50));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
 
         await subscription.cancel();
 
@@ -815,7 +815,7 @@ void main() {
         ));
 
         // Wait for mutation 1's send to start (which adds mutation 2)
-        await Future.delayed(const Duration(milliseconds: 50));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
 
         // At this point:
         // - Mutation 1's send is awaiting sendCompleter
@@ -825,7 +825,7 @@ void main() {
 
         // Complete mutation 1
         sendCompleter.complete('B_server');
-        await Future.delayed(const Duration(milliseconds: 100));
+        await Future<void>.delayed(const Duration(milliseconds: 100));
 
         // After mutation 1 completes:
         // - Server value is B_server
@@ -949,7 +949,7 @@ void main() {
           ),
         ));
 
-        await Future.delayed(const Duration(milliseconds: 20));
+        await Future<void>.delayed(const Duration(milliseconds: 20));
         expect(offlineCache.pendingMutationCount, equals(2));
 
         offlineCache.clearPendingMutations();

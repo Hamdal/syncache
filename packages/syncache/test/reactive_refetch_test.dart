@@ -75,12 +75,12 @@ void main() {
             .listen(values.add);
 
         // Wait for initial emit
-        await Future.delayed(Duration(milliseconds: 50));
+        await Future<void>.delayed(Duration(milliseconds: 50));
         expect(values, equals(['initial']));
 
         // Update the value
         await cache.set(key: 'test-key', value: 'updated');
-        await Future.delayed(Duration(milliseconds: 50));
+        await Future<void>.delayed(Duration(milliseconds: 50));
 
         expect(values, equals(['initial', 'updated']));
 
@@ -104,7 +104,7 @@ void main() {
         final values = <String>[];
         final subscription = stream.listen(values.add);
 
-        await Future.delayed(Duration(milliseconds: 100));
+        await Future<void>.delayed(Duration(milliseconds: 100));
 
         // Should emit exactly once
         expect(values, equals(['events-1']));
@@ -129,12 +129,12 @@ void main() {
         final subscription = stream.listen(values.add);
 
         // Wait for initial fetch
-        await Future.delayed(Duration(milliseconds: 100));
+        await Future<void>.delayed(Duration(milliseconds: 100));
         expect(values, equals(['events-1']));
 
         // Change the dependency
         await cache.set(key: 'workspace', value: 'new-workspace');
-        await Future.delayed(Duration(milliseconds: 100));
+        await Future<void>.delayed(Duration(milliseconds: 100));
 
         // Should have refetched exactly once more
         expect(values, equals(['events-1', 'events-2']));
@@ -162,7 +162,7 @@ void main() {
         final subscription = stream.listen(values.add);
 
         // Wait for initial fetch
-        await Future.delayed(Duration(milliseconds: 100));
+        await Future<void>.delayed(Duration(milliseconds: 100));
         expect(values, equals(['events-1']));
 
         // Mutate the dependency
@@ -173,7 +173,7 @@ void main() {
             send: (v) async => 'mutated-workspace',
           ),
         );
-        await Future.delayed(Duration(milliseconds: 100));
+        await Future<void>.delayed(Duration(milliseconds: 100));
 
         // Should have refetched exactly once more
         expect(values, equals(['events-1', 'events-2']));
@@ -198,22 +198,22 @@ void main() {
         final subscription = stream.listen(values.add);
 
         // Wait for initial fetch
-        await Future.delayed(Duration(milliseconds: 100));
+        await Future<void>.delayed(Duration(milliseconds: 100));
         expect(values, equals(['dashboard-1']));
 
         // Change first dependency
         await cache.set(key: 'user', value: 'new-user');
-        await Future.delayed(Duration(milliseconds: 100));
+        await Future<void>.delayed(Duration(milliseconds: 100));
         expect(values.last, equals('dashboard-2'));
 
         // Change second dependency
         await cache.set(key: 'workspace', value: 'new-workspace');
-        await Future.delayed(Duration(milliseconds: 100));
+        await Future<void>.delayed(Duration(milliseconds: 100));
         expect(values.last, equals('dashboard-3'));
 
         // Change third dependency
         await cache.set(key: 'settings', value: 'new-settings');
-        await Future.delayed(Duration(milliseconds: 100));
+        await Future<void>.delayed(Duration(milliseconds: 100));
         expect(values.last, equals('dashboard-4'));
 
         expect(fetchCount, equals(4));
@@ -250,13 +250,13 @@ void main() {
         final sub2 = tasksStream.listen(tasksValues.add);
 
         // Wait for initial fetches
-        await Future.delayed(Duration(milliseconds: 100));
+        await Future<void>.delayed(Duration(milliseconds: 100));
         expect(eventsValues, equals(['events-1']));
         expect(tasksValues, equals(['tasks-1']));
 
         // Change the shared dependency
         await cache.set(key: 'workspace', value: 'new-workspace');
-        await Future.delayed(Duration(milliseconds: 100));
+        await Future<void>.delayed(Duration(milliseconds: 100));
 
         // Both should have refetched
         expect(eventsValues, equals(['events-1', 'events-2']));
@@ -279,16 +279,16 @@ void main() {
         );
 
         final subscription = stream.listen((_) {});
-        await Future.delayed(Duration(milliseconds: 100));
+        await Future<void>.delayed(Duration(milliseconds: 100));
         final countAfterInit = fetchCount;
 
         // Cancel the subscription
         await subscription.cancel();
-        await Future.delayed(Duration(milliseconds: 50));
+        await Future<void>.delayed(Duration(milliseconds: 50));
 
         // Change the dependency after cancel
         await cache.set(key: 'workspace', value: 'changed');
-        await Future.delayed(Duration(milliseconds: 100));
+        await Future<void>.delayed(Duration(milliseconds: 100));
 
         // Should NOT have refetched (watcher was cancelled)
         expect(fetchCount, equals(countAfterInit));
@@ -309,13 +309,13 @@ void main() {
         final values = <String>[];
         final subscription = stream.listen(values.add);
 
-        await Future.delayed(Duration(milliseconds: 100));
+        await Future<void>.delayed(Duration(milliseconds: 100));
         expect(values, equals(['events-1']));
         final countAfterInit = fetchCount;
 
         // Even if we set a key, nothing should happen since no deps
         await cache.set(key: 'random', value: 'value');
-        await Future.delayed(Duration(milliseconds: 100));
+        await Future<void>.delayed(Duration(milliseconds: 100));
 
         // Should not have refetched
         expect(fetchCount, equals(countAfterInit));
@@ -344,13 +344,13 @@ void main() {
           onError: errors.add,
         );
 
-        await Future.delayed(Duration(milliseconds: 100));
+        await Future<void>.delayed(Duration(milliseconds: 100));
         expect(values, equals(['events']));
 
         // Now trigger an error
         shouldFail = true;
         await cache.set(key: 'trigger', value: 'change');
-        await Future.delayed(Duration(milliseconds: 100));
+        await Future<void>.delayed(Duration(milliseconds: 100));
 
         expect(errors, isNotEmpty);
 
@@ -372,13 +372,13 @@ void main() {
         final values = <String>[];
         final subscription = stream.listen(values.add);
 
-        await Future.delayed(Duration(milliseconds: 100));
+        await Future<void>.delayed(Duration(milliseconds: 100));
         expect(values, equals(['events-1']));
         final countAfterInit = fetchCount;
 
         // Set an unrelated key
         await cache.set(key: 'unrelated', value: 'value');
-        await Future.delayed(Duration(milliseconds: 100));
+        await Future<void>.delayed(Duration(milliseconds: 100));
 
         // Should not have refetched
         expect(fetchCount, equals(countAfterInit));
@@ -395,7 +395,7 @@ void main() {
           fetch: (_) async {
             fetchCount++;
             // Simulate network delay
-            await Future.delayed(Duration(milliseconds: 20));
+            await Future<void>.delayed(Duration(milliseconds: 20));
             return 'events-$fetchCount';
           },
           refetchWhen: ['workspace'],
@@ -404,7 +404,7 @@ void main() {
         final values = <String>[];
         final subscription = stream.listen(values.add);
 
-        await Future.delayed(Duration(milliseconds: 100));
+        await Future<void>.delayed(Duration(milliseconds: 100));
         final countAfterInit = fetchCount;
 
         // Rapid changes
@@ -413,7 +413,7 @@ void main() {
         await cache.set(key: 'workspace', value: 'ws-3');
 
         // Wait for all fetches to complete
-        await Future.delayed(Duration(milliseconds: 300));
+        await Future<void>.delayed(Duration(milliseconds: 300));
 
         // All changes should trigger refetches
         expect(fetchCount, greaterThan(countAfterInit));
@@ -439,16 +439,16 @@ void main() {
         final values = <String>[];
         final subscription = stream.listen(values.add);
 
-        await Future.delayed(Duration(milliseconds: 100));
+        await Future<void>.delayed(Duration(milliseconds: 100));
         expect(values, equals(['events-1']));
 
         // Simulate user switching
         await cache.set(key: 'user', value: 'user-1');
-        await Future.delayed(Duration(milliseconds: 100));
+        await Future<void>.delayed(Duration(milliseconds: 100));
         expect(values, equals(['events-1', 'events-2']));
 
         await cache.set(key: 'user', value: 'user-2');
-        await Future.delayed(Duration(milliseconds: 100));
+        await Future<void>.delayed(Duration(milliseconds: 100));
         expect(values, equals(['events-1', 'events-2', 'events-3']));
 
         expect(fetchCount, equals(3));
@@ -474,17 +474,17 @@ void main() {
         final values = <String>[];
         final subscription = stream.listen(values.add);
 
-        await Future.delayed(Duration(milliseconds: 100));
+        await Future<void>.delayed(Duration(milliseconds: 100));
         expect(values, equals(['data-1']));
         final countAfterInit = fetchCount;
 
         // Invalidate the dependency (this removes it from cache)
         await cache.invalidate('config');
-        await Future.delayed(Duration(milliseconds: 100));
+        await Future<void>.delayed(Duration(milliseconds: 100));
 
         // Setting the config again should still trigger refetch
         await cache.set(key: 'config', value: 'new-config');
-        await Future.delayed(Duration(milliseconds: 100));
+        await Future<void>.delayed(Duration(milliseconds: 100));
 
         expect(fetchCount, greaterThan(countAfterInit));
 
@@ -511,11 +511,11 @@ void main() {
         final values = <String>[];
         final subscription = stream.listen(values.add);
 
-        await Future.delayed(Duration(milliseconds: 100));
+        await Future<void>.delayed(Duration(milliseconds: 100));
         expect(values, equals(['events-1']));
 
         await taggableCache.set(key: 'workspace', value: 'ws-1');
-        await Future.delayed(Duration(milliseconds: 100));
+        await Future<void>.delayed(Duration(milliseconds: 100));
 
         expect(values, equals(['events-1', 'events-2']));
 
@@ -532,11 +532,11 @@ void main() {
         );
 
         final subscription = stream.listen((_) {});
-        await Future.delayed(Duration(milliseconds: 100));
+        await Future<void>.delayed(Duration(milliseconds: 100));
 
         // Trigger refetch
         await cache.set(key: 'workspace', value: 'new');
-        await Future.delayed(Duration(milliseconds: 100));
+        await Future<void>.delayed(Duration(milliseconds: 100));
 
         // Check that TTL was applied
         final stored = await store.read('events');
@@ -581,12 +581,12 @@ void main() {
         final values = <String>[];
         final subscription = stream.listen(values.add);
 
-        await Future.delayed(Duration(milliseconds: 100));
+        await Future<void>.delayed(Duration(milliseconds: 100));
         expect(values, equals(['events-1']));
         final countAfterInit = fetchCount;
 
         await cache.set(key: 'workspace', value: 'new');
-        await Future.delayed(Duration(milliseconds: 100));
+        await Future<void>.delayed(Duration(milliseconds: 100));
 
         // Should handle duplicates gracefully (refetch happens)
         expect(fetchCount, greaterThan(countAfterInit));
@@ -610,13 +610,13 @@ void main() {
         final values = <String>[];
         final subscription = stream.listen(values.add);
 
-        await Future.delayed(Duration(milliseconds: 100));
+        await Future<void>.delayed(Duration(milliseconds: 100));
         expect(values, equals(['self-1']));
         final countAfterInit = fetchCount;
 
         // Setting the key should trigger refetch of itself
         await cache.set(key: 'self', value: 'external');
-        await Future.delayed(Duration(milliseconds: 100));
+        await Future<void>.delayed(Duration(milliseconds: 100));
 
         // This creates an interesting scenario - the set updates the value,
         // then triggers refetch which overwrites with fetched value
@@ -640,14 +640,14 @@ void main() {
         );
 
         final subscription = stream.listen((_) {});
-        await Future.delayed(Duration(milliseconds: 100));
+        await Future<void>.delayed(Duration(milliseconds: 100));
 
         // Initial fetch
         final initialCount = fetchCount;
         expect(initialCount, equals(1));
 
         // Wait a bit more to ensure no infinite loops
-        await Future.delayed(Duration(milliseconds: 200));
+        await Future<void>.delayed(Duration(milliseconds: 200));
 
         // Should not have fetched more times
         expect(fetchCount, equals(initialCount));
