@@ -87,16 +87,41 @@ class MutationQueue<T> {
       _pendingMutations.map((m) => m.toInfo()).toList();
 
   /// Emits a new list whenever the pending mutations change.
+  ///
+  /// Seeded: every new listener first receives the current pending list,
+  /// then live updates — late subscribers never miss the current state.
   Stream<List<PendingMutationInfo>> get stream {
     _pendingMutationsController ??=
         StreamController<List<PendingMutationInfo>>.broadcast();
-    return _pendingMutationsController!.stream;
+    final controller = _pendingMutationsController!;
+    return Stream<List<PendingMutationInfo>>.multi((listener) {
+      listener.add(snapshot);
+      final subscription = controller.stream.listen(
+        listener.add,
+        onError: listener.addError,
+        onDone: listener.close,
+      );
+      listener.onCancel = subscription.cancel;
+    });
   }
 
   /// Emits `true` when all mutations are synced, `false` otherwise.
+  ///
+  /// Seeded: every new listener first receives the current sync state
+  /// (`false` while mutations are pending, `true` when the queue is empty),
+  /// then live updates.
   Stream<bool> get isSyncedStream {
     _isSyncedController ??= StreamController<bool>.broadcast();
-    return _isSyncedController!.stream;
+    final controller = _isSyncedController!;
+    return Stream<bool>.multi((listener) {
+      listener.add(_pendingMutations.isEmpty);
+      final subscription = controller.stream.listen(
+        listener.add,
+        onError: listener.addError,
+        onDone: listener.close,
+      );
+      listener.onCancel = subscription.cancel;
+    });
   }
 
   void add(PendingMutation<T> mutation) {
