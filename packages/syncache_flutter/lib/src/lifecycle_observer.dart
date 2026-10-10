@@ -190,12 +190,20 @@ class SyncacheLifecycleObserver<T> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _isAttached = true;
 
-    if (config.refetchOnReconnect && network != null) {
+    if (network != null) {
       _connectivitySubscription = network!.onConnectivityChanged.listen(
         (isOnline) {
-          if (isOnline) {
-            _refetchAll();
+          if (!isOnline) return;
+
+          // Refresh watchers on reconnect (unless disabled).
+          if (config.refetchOnReconnect) {
+            unawaited(_refetchAll());
           }
+
+          // Belt-and-braces: flush queued mutations on reconnect even for
+          // caches whose Network is not a ReactiveNetwork (and therefore
+          // does not flush them itself).
+          unawaited(cache.processPendingMutations());
         },
       );
     }

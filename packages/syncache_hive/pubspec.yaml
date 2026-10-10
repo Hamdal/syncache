@@ -3,7 +3,7 @@ description: >-
   Hive storage backend for Syncache. Provides cross-platform persistent caching
   with full support for tag-based invalidation, pattern matching, and automatic
   JSON serialization.
-version: 0.1.2
+version: 0.2.0
 repository: https://github.com/Hamdal/syncache
 homepage: https://github.com/Hamdal/syncache
 issue_tracker: https://github.com/Hamdal/syncache/issues
@@ -17,8 +17,16 @@ environment:
   sdk: ^3.0.0
 
 dependencies:
-  syncache: ^0.1.2
+  syncache: ^0.2.0
   hive_ce: ^2.20.2
+
+# Local development: resolve the sibling package from this repository
+# instead of pub.dev. Committed (rather than using a pubspec_overrides.yaml)
+# so CI resolves the package without melos while `syncache` 0.2.0 is not yet
+# published. `pub publish` ignores dependency overrides.
+dependency_overrides:
+  syncache:
+    path: ../syncache
 
 dev_dependencies:
   lints: ^3.0.0

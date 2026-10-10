@@ -72,6 +72,11 @@ class CacheBuilder<T> extends StatefulWidget {
   /// - [AsyncSnapshot.connectionState]: Current connection state
   /// - [AsyncSnapshot.data]: The cached value (if available)
   /// - [AsyncSnapshot.error]: Any error that occurred
+  ///
+  /// Note: invalidation (including `invalidate()`, `invalidateTag()`, and
+  /// `clear()`) does not end the subscription — the widget is refetched and
+  /// keeps rebuilding. [ConnectionState.done] only occurs after the widget
+  /// is disposed (or the underlying cache is disposed).
   final Widget Function(BuildContext context, AsyncSnapshot<T> snapshot)
       builder;
 

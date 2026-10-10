@@ -131,6 +131,7 @@ void main() {
 
       when(() => mockNetwork.onConnectivityChanged)
           .thenAnswer((_) => connectivityController.stream);
+      when(() => mockCache.processPendingMutations()).thenAnswer((_) async {});
     });
 
     tearDown(() {
@@ -313,6 +314,10 @@ void main() {
           ttl: any(named: 'ttl'),
         ),
       );
+
+      // Watcher refetch is disabled, but queued mutations are still
+      // flushed on reconnect (belt-and-braces).
+      verify(() => mockCache.processPendingMutations()).called(1);
 
       observer.detach();
     });

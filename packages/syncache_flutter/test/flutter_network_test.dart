@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
+import 'package:syncache/syncache.dart';
 import 'package:syncache_flutter/syncache_flutter.dart';
 
 class MockConnectivity extends Mock implements Connectivity {}
@@ -29,6 +30,13 @@ void main() {
       final network = FlutterNetwork(connectivity: mockConnectivity);
       expect(network.isOnline, isTrue);
       expect(network.isInitialized, isFalse);
+    });
+
+    test('is a ReactiveNetwork so Syncache can flush mutations on reconnect',
+        () {
+      final network = FlutterNetwork(connectivity: mockConnectivity);
+      expect(network, isA<ReactiveNetwork>());
+      expect(network.onConnectivityChanged, isA<Stream<bool>>());
     });
 
     test('initialize checks current connectivity', () async {

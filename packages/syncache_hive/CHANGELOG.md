@@ -1,3 +1,10 @@
+## 0.2.0
+
+### Changed
+
+- Version alignment with `syncache` 0.2.0 (dependency constraint raised to
+  `^0.2.0`). No functional changes in this package.
+
 ## 0.1.2
 
 ### Changed

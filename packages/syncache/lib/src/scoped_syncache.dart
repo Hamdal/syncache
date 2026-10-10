@@ -4,6 +4,7 @@ import 'cache_result.dart';
 import 'cancellation.dart';
 import 'fetcher.dart';
 import 'mutation.dart';
+import 'mutation_handle.dart';
 import 'pending_mutation_info.dart';
 import 'policy.dart';
 import 'prefetch.dart';
@@ -160,7 +161,7 @@ class ScopedSyncache<T> {
   }
 
   /// See [Syncache.mutate] for full documentation.
-  Future<void> mutate({
+  Future<MutationHandle<T>> mutate({
     required String key,
     required Mutation<T> mutation,
     List<String>? invalidates,
@@ -198,8 +199,12 @@ class ScopedSyncache<T> {
   }
 
   /// Clears all cached entries within this scope.
-  Future<void> clear() {
-    return _cache.clearScope(scope);
+  ///
+  /// By default active watchers are refetched and their streams stay open
+  /// (see [Syncache.clear]); pass `refetchWatchers: false` to wipe without
+  /// triggering refetches.
+  Future<void> clear({bool refetchWatchers = true}) {
+    return _cache.clearScope(scope, refetchWatchers: refetchWatchers);
   }
 
   /// See [Syncache.prefetch] for full documentation.
@@ -255,6 +260,18 @@ class ScopedSyncache<T> {
 
   /// Clears mutations for ALL scopes.
   void clearPendingMutations() => _cache.clearPendingMutations();
+
+  /// Removes a pending mutation by id across ALL scopes.
+  /// See [Syncache.removePendingMutation].
+  bool removePendingMutation(String id) => _cache.removePendingMutation(id);
+
+  /// Removes the first pending mutation across ALL scopes.
+  @Deprecated('Use removePendingMutation to remove a specific mutation')
+  bool removeFirstPendingMutation() => _cache.removeFirstPendingMutation();
+
+  /// Processes pending mutations across ALL scopes.
+  /// See [Syncache.processPendingMutations].
+  Future<void> processPendingMutations() => _cache.processPendingMutations();
 
   Syncache<T> get cache => _cache;
 }

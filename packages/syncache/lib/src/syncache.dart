@@ -7,6 +7,7 @@ import 'fetch_engine.dart';
 import 'fetcher.dart';
 import 'metadata.dart';
 import 'mutation.dart';
+import 'mutation_handle.dart';
 import 'mutation_queue.dart';
 import 'network.dart';
 import 'observer.dart';
@@ -101,13 +102,28 @@ class Syncache<T> {
   /// Key: dependency key, Value: set of keys that depend on it.
   final Map<String, Set<String>> _dependents = {};
 
-  /// Key: watcher key, Value: info about the watcher including its fetcher.
-  final Map<String, _DependencyWatcher<T>> _dependencyWatchers = {};
+  /// Active value-watch registrations (`watch` / `watchWithDependencies`),
+  /// keyed by cache key. Records the parameters each watcher was created
+  /// with so its entry can be refetched with those same parameters.
+  final Map<String, _WatchRegistration<T>> _watchers = {};
+
+  /// Active metadata-watch registrations (`watchWithMeta`), keyed by cache
+  /// key.
+  final Map<String, _WatchRegistration<T>> _metaWatchers = {};
+
+  /// Subscription to a [ReactiveNetwork]'s connectivity changes, used to
+  /// flush pending mutations when the device comes back online. Null when
+  /// the provided [network] is not a [ReactiveNetwork].
+  StreamSubscription<bool>? _connectivitySubscription;
 
   /// Creates a [Syncache] instance with the given [store] and optional [network].
   ///
   /// If [network] is not provided, [AlwaysOnline] is used, meaning the cache
   /// will always attempt network requests when needed.
+  ///
+  /// If [network] is a [ReactiveNetwork], the cache subscribes to its
+  /// connectivity changes and automatically flushes pending mutations when
+  /// the device comes back online — no new `mutate()` call required.
   ///
   /// Provide [observers] to monitor cache operations for logging or analytics.
   ///
@@ -150,6 +166,18 @@ class Syncache<T> {
       notifyWatchers: (key) => _notify(key, isFromCache: false),
       performInvalidations: _performMutationInvalidations,
     );
+
+    // Automatic mutation flush on reconnect: only possible when the
+    // network reports connectivity changes.
+    if (this.network is ReactiveNetwork) {
+      _connectivitySubscription = (this.network as ReactiveNetwork)
+          .onConnectivityChanged
+          .listen((online) {
+        if (online && !_isDisposed) {
+          unawaited(_mutationQueue.processQueue());
+        }
+      });
+    }
   }
 
   /// Notifies all observers, catching errors to prevent observer failures
@@ -388,12 +416,12 @@ class Syncache<T> {
     }
 
     for (final dependentKey in dependentKeys.toList()) {
-      final watcher = _dependencyWatchers[dependentKey];
+      final watcher = _watchers[dependentKey];
       if (watcher == null) continue;
 
       final controller = _controllers[dependentKey];
       if (controller == null || controller.isClosed) {
-        _removeDependencyWatcher(dependentKey);
+        _removeValueWatcher(dependentKey);
         continue;
       }
 
@@ -412,16 +440,49 @@ class Syncache<T> {
     }
   }
 
-  /// Removes a dependency watcher and cleans up tracking.
-  void _removeDependencyWatcher(String key) {
-    final watcher = _dependencyWatchers.remove(key);
+  /// Removes a value-watch registration and cleans up its dependency edges.
+  void _removeValueWatcher(String key) {
+    final watcher = _watchers.remove(key);
     if (watcher == null) return;
 
-    for (final dep in watcher.dependsOn) {
+    _removeDependentEdges(key, watcher.dependsOn);
+  }
+
+  /// Removes the dependent edges [key] contributes for each of [dependsOn].
+  void _removeDependentEdges(String key, List<String> dependsOn) {
+    for (final dep in dependsOn) {
       _dependents[dep]?.remove(key);
       if (_dependents[dep]?.isEmpty ?? false) {
         _dependents.remove(dep);
       }
+    }
+  }
+
+  /// Records a watch registration in [registry] for [key], replacing any
+  /// previous registration and re-wiring its dependency edges.
+  void _registerWatcher(
+    Map<String, _WatchRegistration<T>> registry,
+    String key, {
+    required Fetcher<T> fetch,
+    required Policy policy,
+    required Duration? ttl,
+    List<String> dependsOn = const [],
+  }) {
+    final existing = registry[key];
+    if (existing != null) {
+      _removeDependentEdges(key, existing.dependsOn);
+    }
+
+    registry[key] = _WatchRegistration<T>(
+      key: key,
+      fetch: fetch,
+      policy: policy,
+      ttl: ttl,
+      dependsOn: dependsOn,
+    );
+
+    for (final dep in dependsOn) {
+      _dependents.putIfAbsent(dep, () => {}).add(key);
     }
   }
 
@@ -438,6 +499,23 @@ class Syncache<T> {
   /// The stream is a broadcast stream, allowing multiple listeners.
   /// When all listeners unsubscribe, the stream controller is closed
   /// and removed.
+  ///
+  /// ## Invalidation semantics
+  ///
+  /// Invalidation ([invalidate], [invalidateTag], [invalidatePattern],
+  /// [clear]) does **not** close this stream. Instead the watcher is
+  /// refetched with the fetch/policy/ttl it was created with:
+  ///
+  /// - Refetch success → the fresh value is emitted.
+  /// - Refetch failure → the error is emitted and the stream remains
+  ///   usable.
+  /// - [Policy.cacheOnly] watchers receive a [CacheMissException] (their
+  ///   entry was deleted) as a stream error, without closing.
+  ///
+  /// Listeners keep receiving the last value until the refetch completes
+  /// (stale-while-invalidated). The stream only completes
+  /// ([ConnectionState.done]) when every listener unsubscribes or the
+  /// cache is disposed.
   ///
   /// Example:
   /// ```dart
@@ -467,9 +545,12 @@ class Syncache<T> {
         onCancel: () {
           _controllers[key]?.close();
           _controllers.remove(key);
+          _removeValueWatcher(key);
         },
       ),
     );
+
+    _registerWatcher(_watchers, key, fetch: fetch, policy: policy, ttl: ttl);
 
     final controllerAtStart = controller;
 
@@ -500,6 +581,10 @@ class Syncache<T> {
   /// metadata about whether the data came from cache, its freshness,
   /// and when it was stored.
   ///
+  /// Like [watch], invalidation refetches this stream instead of closing
+  /// it: listeners keep the last [CacheResult] until the refetch emits.
+  /// See [watch] for the full contract.
+  ///
   /// Example:
   /// ```dart
   /// final subscription = cache.watchWithMeta(
@@ -527,9 +612,13 @@ class Syncache<T> {
         onCancel: () {
           _metaControllers[key]?.close();
           _metaControllers.remove(key);
+          _metaWatchers.remove(key);
         },
       ),
     );
+
+    _registerWatcher(_metaWatchers, key,
+        fetch: fetch, policy: policy, ttl: ttl);
 
     final controllerAtStart = controller;
 
@@ -591,6 +680,9 @@ class Syncache<T> {
   /// 2. Updates whenever the key itself changes
   /// 3. Refetched values whenever any dependency key changes
   ///
+  /// Like [watch], invalidation of this key refetches the stream instead
+  /// of closing it. See [watch] for the full contract.
+  ///
   /// When all listeners unsubscribe, the dependency tracking is cleaned up.
   ///
   /// Note: The dependency keys don't need to exist in the cache beforehand.
@@ -609,27 +701,24 @@ class Syncache<T> {
       return watch(key: key, fetch: fetch, policy: policy, ttl: ttl);
     }
 
-    _dependencyWatchers[key] = _DependencyWatcher<T>(
-      key: key,
-      fetch: fetch,
-      policy: policy,
-      ttl: ttl,
-      dependsOn: refetchWhen,
-    );
-
-    for (final dep in refetchWhen) {
-      _dependents.putIfAbsent(dep, () => {}).add(key);
-    }
-
     final controller = _controllers.putIfAbsent(
       key,
       () => StreamController<T>.broadcast(
         onCancel: () {
           _controllers[key]?.close();
           _controllers.remove(key);
-          _removeDependencyWatcher(key);
+          _removeValueWatcher(key);
         },
       ),
+    );
+
+    _registerWatcher(
+      _watchers,
+      key,
+      fetch: fetch,
+      policy: policy,
+      ttl: ttl,
+      dependsOn: refetchWhen,
     );
 
     final controllerAtStart = controller;
@@ -671,18 +760,28 @@ class Syncache<T> {
   /// Watchers of the [key] are notified of both the optimistic update
   /// and the eventual server confirmation.
   ///
-  /// Example:
+  /// Returns a [MutationHandle] for awaiting *this* mutation's server
+  /// confirmation. The returned future completes as soon as the optimistic
+  /// value is applied — it does not wait for the server. Use the handle to
+  /// await the outcome:
+  ///
   /// ```dart
-  /// await cache.mutate(
+  /// final handle = await cache.mutate(
   ///   key: 'user:123',
   ///   mutation: Mutation<User>(
   ///     apply: (user) => user.copyWith(name: 'New Name'),
-  ///     send: (user) async {
-  ///       final response = await api.updateUser(user);
-  ///       return User.fromJson(response);
-  ///     },
+  ///     send: (user) => api.updateUser(user),
   ///   ),
   /// );
+  ///
+  /// switch (await handle.outcome) {
+  ///   case MutationSuccess(:final serverValue):
+  ///     print('Server confirmed: $serverValue');
+  ///   case MutationFailure(:final error, :final retried):
+  ///     print('Failed after $retried retries: $error');
+  ///   case MutationDiscarded():
+  ///     print('Removed before syncing');
+  /// }
   /// ```
   ///
   /// You can also specify cache entries to invalidate after successful sync:
@@ -697,7 +796,7 @@ class Syncache<T> {
   /// ```
   ///
   /// Throws [CacheMissException] if no cached value exists for [key].
-  Future<void> mutate({
+  Future<MutationHandle<T>> mutate({
     required String key,
     required Mutation<T> mutation,
     List<String>? invalidates,
@@ -726,13 +825,15 @@ class Syncache<T> {
 
     unawaited(_notifyDependents(key));
 
-    _mutationQueue.add(PendingMutation(
+    final pending = PendingMutation(
       key: key,
       mutation: mutation,
       optimisticValue: optimisticValue,
       invalidates: invalidates,
       invalidateTags: invalidateTags,
-    ));
+    );
+    _mutationQueue.add(pending);
+    return pending.handle;
   }
 
   /// Returns the number of pending mutations.
@@ -766,15 +867,49 @@ class Syncache<T> {
   }
 
   /// Removes all pending mutations from the sync queue.
+  ///
+  /// The mutation currently syncing (if any) is allowed to finish, but no
+  /// further mutations are processed. Removed mutations' handles settle
+  /// with [MutationDiscarded].
   void clearPendingMutations() {
     _checkNotDisposed();
     _mutationQueue.clear();
   }
 
+  /// Removes the pending mutation with the given [id] from the sync queue.
+  ///
+  /// Returns `true` if a mutation with that id was found and removed, in
+  /// which case its handle settles with [MutationDiscarded]. The id is the
+  /// `PendingMutationInfo.id` exposed by [pendingMutationsSnapshot] and
+  /// [pendingMutationsStream].
+  ///
+  /// If the removed mutation was currently syncing, its request may still
+  /// reach the server — Syncache just stops tracking it.
+  bool removePendingMutation(String id) {
+    _checkNotDisposed();
+    return _mutationQueue.removeById(id);
+  }
+
   /// Removes the first pending mutation from the sync queue.
+  @Deprecated('Use removePendingMutation to remove a specific mutation')
   bool removeFirstPendingMutation() {
     _checkNotDisposed();
     return _mutationQueue.removeFirst();
+  }
+
+  /// Processes pending mutations now, without waiting for the next
+  /// `mutate()` call or a reconnect event.
+  ///
+  /// Mutations are normally processed automatically: immediately after
+  /// [mutate] when online, and when a [ReactiveNetwork] reports that the
+  /// device is back online. Call this to force a pass manually — e.g. after
+  /// login restores auth, or from a "Retry now" button in a sync banner.
+  ///
+  /// Safe to call repeatedly: while a processing pass is running (or the
+  /// network is offline) additional calls return immediately.
+  Future<void> processPendingMutations() async {
+    _checkNotDisposed();
+    await _mutationQueue.processQueue();
   }
 
   // ============================================================
@@ -783,8 +918,19 @@ class Syncache<T> {
 
   /// Invalidates (deletes) the cached entry for the given [key].
   ///
-  /// Any active watchers for the key will have their streams closed.
-  /// The next [get] or [watch] call will fetch fresh data.
+  /// Active watchers of the key stay open: each is refetched using its own
+  /// fetch/policy/ttl and receives the fresh value when the refetch
+  /// completes. Until then listeners keep seeing the last value
+  /// (stale-while-invalidated).
+  ///
+  /// If the refetch fails, the error is emitted on the stream and the
+  /// stream remains usable — invalidate again (or restore connectivity) to
+  /// retry. [Policy.cacheOnly] watchers cannot recover from a deleted
+  /// entry and receive a [CacheMissException] as a stream error, also
+  /// without closing the stream.
+  ///
+  /// The stream only completes (ConnectionState.done) when the watcher is
+  /// unsubscribed or the cache is disposed.
   ///
   /// Example:
   /// ```dart
@@ -794,7 +940,7 @@ class Syncache<T> {
     _checkNotDisposed();
     await store.delete(key);
     _notifyObservers((o) => o.onInvalidate(key));
-    _notifyRemoval(key);
+    await _refetchWatchers([key]);
   }
 
   /// Invalidates all cache entries with the specified [tag].
@@ -802,7 +948,8 @@ class Syncache<T> {
   /// Requires the store to implement [TaggableStore].
   /// If the store doesn't support tagging, this method does nothing.
   ///
-  /// All watchers for affected entries will have their streams closed.
+  /// Active watchers of affected entries stay open and are refetched (see
+  /// [invalidate] for the exact stream semantics).
   ///
   /// Example:
   /// ```dart
@@ -826,14 +973,15 @@ class Syncache<T> {
 
     for (final key in keys) {
       _notifyObservers((o) => o.onInvalidate(key));
-      _notifyRemoval(key);
     }
+    await _refetchWatchers(keys);
   }
 
   /// Invalidates all cache entries that have any of the specified [tags].
   ///
   /// If [matchAll] is true, only entries with ALL tags are invalidated.
-  /// Requires [TaggableStore].
+  /// Requires [TaggableStore]. Active watchers of affected entries stay
+  /// open and are refetched (see [invalidate]).
   Future<void> invalidateTags(List<String> tags,
       {bool matchAll = false}) async {
     _checkNotDisposed();
@@ -860,14 +1008,17 @@ class Syncache<T> {
 
     for (final key in keysToNotify) {
       _notifyObservers((o) => o.onInvalidate(key));
-      _notifyRemoval(key);
     }
+    await _refetchWatchers(keysToNotify);
   }
 
   /// Invalidates all cache entries whose keys match the given glob [pattern].
   ///
   /// Requires the store to implement [TaggableStore].
   /// If the store doesn't support pattern matching, this method does nothing.
+  ///
+  /// Active watchers of affected entries stay open and are refetched (see
+  /// [invalidate] for the exact stream semantics).
   ///
   /// Supports simple glob patterns:
   /// - `*` matches any characters
@@ -881,7 +1032,16 @@ class Syncache<T> {
   /// // Invalidate entries for a specific date pattern
   /// await cache.invalidatePattern('events:2024-03-*');
   /// ```
-  Future<void> invalidatePattern(String pattern) async {
+  Future<void> invalidatePattern(String pattern) {
+    return _invalidatePattern(pattern, refetchWatchers: true);
+  }
+
+  /// Shared pattern-invalidation implementation. [refetchWatchers] is false
+  /// for scope clears that opt out of refetching (see [clearScope]).
+  Future<void> _invalidatePattern(
+    String pattern, {
+    required bool refetchWatchers,
+  }) async {
     _checkNotDisposed();
     if (store is! TaggableStore<T>) return;
 
@@ -891,19 +1051,35 @@ class Syncache<T> {
 
     for (final key in keys) {
       _notifyObservers((o) => o.onInvalidate(key));
-      _notifyRemoval(key);
+    }
+    if (refetchWatchers) {
+      await _refetchWatchers(keys);
     }
   }
 
   /// Clears all cached entries.
-  Future<void> clear() async {
+  ///
+  /// By default every active watcher is refetched afterwards, exactly like
+  /// [invalidate] does per key (streams stay open, listeners keep the last
+  /// value until the refetch completes). Pass `refetchWatchers: false` for
+  /// bulk wipes and tests where refetching everything is undesired: the
+  /// streams then stay open and silent instead.
+  ///
+  /// ```dart
+  /// // Logout: wipe everything and let watchers reload
+  /// await cache.clear();
+  ///
+  /// // Bulk wipe without triggering a refill storm
+  /// await cache.clear(refetchWatchers: false);
+  /// ```
+  Future<void> clear({bool refetchWatchers = true}) async {
     _checkNotDisposed();
     await store.clear();
     _notifyObservers((o) => o.onClear());
+    if (!refetchWatchers) return;
+
     final allKeys = {..._controllers.keys, ..._metaControllers.keys};
-    for (final key in allKeys) {
-      _notifyRemoval(key);
-    }
+    await _refetchWatchers(allKeys);
   }
 
   // ============================================================
@@ -936,10 +1112,13 @@ class Syncache<T> {
 
   /// Clears all cached entries within a scope.
   ///
+  /// By default, active watchers of affected entries are refetched and
+  /// their streams stay open — the same semantics as [clear]. Pass
+  /// `refetchWatchers: false` to wipe silently without refetching.
+  ///
   /// Requires [TaggableStore] for pattern matching.
-  Future<void> clearScope(String scope) async {
-    _checkNotDisposed();
-    await invalidatePattern('$scope:*');
+  Future<void> clearScope(String scope, {bool refetchWatchers = true}) {
+    return _invalidatePattern('$scope:*', refetchWatchers: refetchWatchers);
   }
 
   /// Invalidates entries within a scope matching a pattern.
@@ -1259,6 +1438,9 @@ class Syncache<T> {
     if (_isDisposed) return;
     _isDisposed = true;
 
+    unawaited(_connectivitySubscription?.cancel());
+    _connectivitySubscription = null;
+
     // Close all stream controllers
     for (final controller in _controllers.values) {
       if (!controller.isClosed) {
@@ -1274,6 +1456,11 @@ class Syncache<T> {
       }
     }
     _metaControllers.clear();
+
+    // Clear watch registrations and dependency tracking
+    _watchers.clear();
+    _metaWatchers.clear();
+    _dependents.clear();
 
     // Dispose mutation queue
     _mutationQueue.dispose();
@@ -1382,17 +1569,71 @@ class Syncache<T> {
     }
   }
 
-  /// Notifies watchers that a key has been removed.
-  void _notifyRemoval(String key) {
-    final controller = _controllers[key];
-    if (controller != null && !controller.isClosed) {
-      controller.close();
-      _controllers.remove(key);
+  /// Refetches every active watcher of the given [keys] after their entries
+  /// were invalidated.
+  ///
+  /// Each watcher is refetched with its own fetch/policy/ttl. Successful
+  /// refetches are emitted through the regular notification path; failures
+  /// are emitted as stream errors while keeping every stream open.
+  Future<void> _refetchWatchers(Iterable<String> keys) async {
+    for (final key in keys) {
+      final valueRegistration = _watchers[key];
+      if (valueRegistration != null) {
+        await _refetchValueWatcher(valueRegistration);
+      }
+
+      final metaRegistration = _metaWatchers[key];
+      if (metaRegistration != null) {
+        await _refetchMetaWatcher(metaRegistration);
+      }
     }
-    final metaController = _metaControllers[key];
-    if (metaController != null && !metaController.isClosed) {
-      metaController.close();
-      _metaControllers.remove(key);
+  }
+
+  /// Refetches a single value watcher after invalidation.
+  ///
+  /// The stream stays open in all cases: the refetched value is emitted on
+  /// success, the error on failure. A [Policy.cacheOnly] watcher therefore
+  /// receives a [CacheMissException] (its entry was just deleted and it
+  /// never goes to the network) without closing.
+  Future<void> _refetchValueWatcher(_WatchRegistration<T> registration) async {
+    final controller = _controllers[registration.key];
+    if (controller == null || controller.isClosed) return;
+
+    try {
+      await get(
+        key: registration.key,
+        fetch: registration.fetch,
+        policy: registration.policy,
+        ttl: registration.ttl,
+      );
+    } catch (error) {
+      if (!controller.isClosed) {
+        controller.addError(error);
+      }
+    }
+  }
+
+  /// Refetches a single metadata watcher after invalidation.
+  ///
+  /// Mirrors [_refetchValueWatcher] but emits a full [CacheResult].
+  Future<void> _refetchMetaWatcher(_WatchRegistration<T> registration) async {
+    final controller = _metaControllers[registration.key];
+    if (controller == null || controller.isClosed) return;
+
+    try {
+      final result = await getWithMeta(
+        key: registration.key,
+        fetch: registration.fetch,
+        policy: registration.policy,
+        ttl: registration.ttl,
+      );
+      if (!controller.isClosed) {
+        controller.add(result);
+      }
+    } catch (error) {
+      if (!controller.isClosed) {
+        controller.addError(error);
+      }
     }
   }
 
@@ -1582,8 +1823,13 @@ class Syncache<T> {
   }
 }
 
-/// Internal class to track dependency watcher information.
-class _DependencyWatcher<T> {
+/// Internal record of an active watch registration.
+///
+/// Carries the parameters a watcher was created with so the cache can
+/// refetch with the watcher's own fetch/policy/ttl, and — for
+/// [Syncache.watchWithDependencies] — tracks the dependency keys that
+/// trigger refetches.
+class _WatchRegistration<T> {
   /// The cache key being watched.
   final String key;
 
@@ -1596,15 +1842,15 @@ class _DependencyWatcher<T> {
   /// The TTL to use when refetching.
   final Duration? ttl;
 
-  /// The keys this watcher depends on.
+  /// The keys this watcher depends on (empty for plain watchers).
   final List<String> dependsOn;
 
-  const _DependencyWatcher({
+  const _WatchRegistration({
     required this.key,
     required this.fetch,
     required this.policy,
     required this.ttl,
-    required this.dependsOn,
+    this.dependsOn = const [],
   });
 }
 

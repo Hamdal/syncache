@@ -6,8 +6,8 @@ Flutter integration for [Syncache](https://pub.dev/packages/syncache) - lifecycl
 
 ```yaml
 dependencies:
-  syncache: ^0.1.2
-  syncache_flutter: ^0.1.2
+  syncache: ^0.2.0
+  syncache_flutter: ^0.2.0
 ```
 
 ## Quick Start
@@ -228,7 +228,7 @@ listenable.dispose();
 
 - Dart SDK: ^3.0.0
 - Flutter: >=3.10.0
-- syncache: ^0.1.2
+- syncache: ^0.2.0
 - connectivity_plus: ^7.0.0
 
 ## License
