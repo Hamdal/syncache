@@ -37,6 +37,15 @@ class PendingMutation<T> {
   DateTime? lastAttemptAt;
   Object? lastError;
   PendingMutationStatus status;
+
+  /// Whether this mutation was explicitly discarded from the queue
+  /// ([MutationQueue.clear], [MutationQueue.removeById], retry exhaustion).
+  ///
+  /// Used by the outbox save path: a record whose save completes after its
+  /// mutation was discarded must be deleted again. [MutationQueue.dispose]
+  /// deliberately does NOT set this — records must survive dispose so a
+  /// fresh [Syncache] can replay them.
+  bool discarded = false;
   final List<String>? invalidates;
   final List<String>? invalidateTags;
 
@@ -175,17 +184,20 @@ class MutationQueue<T> {
     });
   }
 
-  void add(PendingMutation<T> mutation) {
+  /// Enqueues [mutation] and, when an outbox is configured, persists its
+  /// record before the returned future completes — so a crash after
+  /// `mutate()` resolves can never lose the write. The processing pass
+  /// starts once the save has landed. Failures are reported via
+  /// `onOutboxError` and never propagate.
+  Future<void> add(PendingMutation<T> mutation) {
     _pendingMutations.add(mutation);
     _notifyChanged();
     if (outbox == null) {
       processQueue();
-      return;
+      return Future.value();
     }
-    // With an outbox, the record is persisted before the processing pass
-    // starts: a crash between enqueue and send must not lose the write.
     mutation.seq = ++_seqCounter;
-    unawaited(_saveToOutbox(mutation).then((_) => processQueue()));
+    return _saveToOutbox(mutation).then((_) => processQueue());
   }
 
   /// Persists [mutation] to the outbox. Failures are reported via
@@ -195,7 +207,9 @@ class MutationQueue<T> {
       await outbox!.save(mutation.toRecord());
       // The mutation may have been discarded while the save was in flight;
       // drop the freshly written record so the outbox mirrors the queue.
-      if (!_pendingMutations.contains(mutation)) {
+      // Dispose does not count as discarding: its records survive so a
+      // restart can replay them.
+      if (mutation.discarded) {
         await _deleteFromOutbox(mutation.id);
       }
     } catch (e) {
@@ -232,6 +246,7 @@ class MutationQueue<T> {
       _pendingMutations.clear();
     }
     for (final mutation in removed) {
+      mutation.discarded = true;
       mutation.settle(MutationDiscarded<T>());
       if (outbox != null) {
         unawaited(_deleteFromOutbox(mutation.id));
@@ -247,6 +262,7 @@ class MutationQueue<T> {
   bool removeFirst() {
     if (_pendingMutations.isEmpty) return false;
     final removed = _pendingMutations.removeAt(0);
+    removed.discarded = true;
     removed.settle(MutationDiscarded<T>());
     if (outbox != null) {
       unawaited(_deleteFromOutbox(removed.id));
@@ -265,6 +281,7 @@ class MutationQueue<T> {
     final index = _pendingMutations.indexWhere((m) => m.id == id);
     if (index < 0) return false;
     final removed = _pendingMutations.removeAt(index);
+    removed.discarded = true;
     removed.settle(MutationDiscarded<T>());
     if (outbox != null) {
       unawaited(_deleteFromOutbox(removed.id));

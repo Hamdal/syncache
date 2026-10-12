@@ -879,7 +879,7 @@ class Syncache<T> {
       invalidateTags: invalidateTags,
       payload: payload,
     );
-    _mutationQueue.add(pending);
+    await _mutationQueue.add(pending);
     return pending.handle;
   }
 
