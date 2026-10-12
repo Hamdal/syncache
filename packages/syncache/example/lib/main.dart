@@ -9,6 +9,7 @@ import 'screens/prefetch_demo.dart';
 import 'screens/retry_demo.dart';
 import 'screens/scoped_demo.dart';
 import 'screens/tags_demo.dart';
+import 'screens/durable_outbox_demo.dart';
 import 'screens/watch_demo.dart';
 import 'services/network.dart';
 
@@ -284,6 +285,24 @@ class _HomePageState extends State<HomePage> {
               Navigator.push(
                 context,
                 MaterialPageRoute(builder: (context) => const TagsDemoScreen()),
+              );
+            },
+          ),
+          const SizedBox(height: 12),
+
+          // Durable outbox demo
+          _DemoCard(
+            icon: Icons.save,
+            title: 'Durable Outbox',
+            description:
+                'Offline writes that survive app restarts via '
+                'recoverPendingMutations.',
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const DurableOutboxDemoScreen(),
+                ),
               );
             },
           ),
