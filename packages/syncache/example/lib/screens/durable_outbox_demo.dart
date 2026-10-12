@@ -65,6 +65,8 @@ class _DurableOutboxDemoScreenState extends State<DurableOutboxDemoScreen> {
       store: _store,
       network: _network,
       outbox: _outbox,
+      decodeOptimisticSnapshot: (snapshot) =>
+          User.fromJson(snapshot as Map<String, dynamic>),
       observers: [
         _DemoObserver(
           onOutboxError: (e) => _appendLog('Outbox error: $e'),
@@ -117,6 +119,9 @@ class _DurableOutboxDemoScreenState extends State<DurableOutboxDemoScreen> {
 
   Future<void> _renameUser() async {
     final newName = 'User ${DateTime.now().second}';
+    final current = _user;
+    if (current == null) return;
+    final optimistic = current.copyWith(name: newName);
     await _cache.mutate(
       key: 'user:profile',
       mutation: Mutation<User>(
@@ -124,9 +129,14 @@ class _DurableOutboxDemoScreenState extends State<DurableOutboxDemoScreen> {
         send: (user) => fakeApi.updateUser(user),
       ),
       payload: {'op': 'rename', 'name': newName},
+      // Persist the optimistic value so recovery replays the exact
+      // pre-death state (decoded via decodeOptimisticSnapshot above).
+      optimisticSnapshot: optimistic.toJson(),
     );
     _appendLog(
-      _network.isOnline ? 'Mutated & synced "$newName"' : 'Queued "$newName"',
+      _network.isOnline
+          ? 'Mutated & synced "$newName"'
+          : 'Queued "$newName" (with snapshot)',
     );
     await _refreshUser();
   }

@@ -109,9 +109,12 @@ final outbox = await HiveMutationOutbox.open();
 final cache = Syncache<User>(
   store: store,
   outbox: outbox, // <- offline writes now survive process death
+  // Decodes optimistic snapshots at recovery (see below).
+  decodeOptimisticSnapshot: (snapshot) => User.fromJson(snapshot as Map<String, dynamic>),
 );
 
-// Pass a payload describing the change — it is persisted with the record.
+// Pass a payload describing the change and a snapshot of the optimistic
+// value — both are persisted with the record.
 final handle = await cache.mutate(
   key: 'user:123',
   mutation: Mutation<User>(
@@ -119,6 +122,7 @@ final handle = await cache.mutate(
     send: (user) => api.updateUser(user),
   ),
   payload: {'op': 'rename', 'userId': 123, 'name': 'New Name'},
+  optimisticSnapshot: user.copyWith(name: 'New Name').toJson(),
 );
 ```
 
@@ -145,8 +149,13 @@ print('$restored unsynced write(s) re-enqueued');
 
 Recovery preserves enqueue order, does not double-apply the optimistic update
 (it was already written before the process died), and flushes immediately if
-the network is online. In `syncache_flutter`, `SyncacheScope` runs recovery
-for you on mount:
+the network is online. Because the record carries the `optimisticSnapshot`
+(decoded by `decodeOptimisticSnapshot`), replay sends the **exact pre-death
+value** — base-dependent mutations like increments and appends replay
+correctly. Records stored without a snapshot fall back to re-deriving
+`apply(currentCached)`, which can double-apply those same mutations; prefer
+always passing a snapshot. In `syncache_flutter`, `SyncacheScope` runs
+recovery for you on mount:
 
 ```dart
 SyncacheScope<User>(
