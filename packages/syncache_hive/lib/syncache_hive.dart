@@ -47,4 +47,5 @@
 /// ```
 library syncache_hive;
 
+export 'src/hive_mutation_outbox.dart' show HiveMutationOutbox;
 export 'src/hive_store.dart' show HiveStore;
