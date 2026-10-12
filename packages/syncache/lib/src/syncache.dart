@@ -8,10 +8,12 @@ import 'fetcher.dart';
 import 'metadata.dart';
 import 'mutation.dart';
 import 'mutation_handle.dart';
+import 'mutation_outbox.dart';
 import 'mutation_queue.dart';
 import 'network.dart';
 import 'observer.dart';
 import 'pending_mutation_info.dart';
+import 'pending_mutation_record.dart';
 import 'policy.dart';
 import 'prefetch.dart';
 import 'retry.dart';
@@ -92,6 +94,15 @@ class Syncache<T> {
   final RetryConfig defaultRetry;
   final MutationRetryConfig mutationRetry;
 
+  /// Optional persistence backend for pending mutations.
+  ///
+  /// When non-null, every enqueued mutation is mirrored to it as a
+  /// [PendingMutationRecord] and survives [dispose] — a freshly constructed
+  /// [Syncache] over the same outbox can replay unsynced writes via
+  /// [recoverPendingMutations], making offline writes survive process
+  /// death. When null (the default) the queue is memory-only.
+  final MutationOutbox? outbox;
+
   late final FetchEngine<T> _fetchEngine;
   late final MutationQueue<T> _mutationQueue;
 
@@ -133,6 +144,11 @@ class Syncache<T> {
   /// Set [mutationRetry] to configure retry behavior for mutation sync operations.
   /// By default, mutations are retried up to 3 times with exponential backoff.
   ///
+  /// Provide [outbox] to make offline writes durable: mutations are mirrored
+  /// to it and can be replayed after a process restart via
+  /// [recoverPendingMutations]. Without an outbox the mutation queue is
+  /// memory-only and unsynced writes are lost when the process dies.
+  ///
   /// Example:
   /// ```dart
   /// final cache = Syncache<User>(
@@ -149,10 +165,12 @@ class Syncache<T> {
     List<SyncacheObserver>? observers,
     RetryConfig? defaultRetry,
     MutationRetryConfig? mutationRetry,
+    MutationOutbox? outbox,
   })  : network = network ?? const AlwaysOnline(),
         observers = observers ?? const [],
         defaultRetry = defaultRetry ?? RetryConfig.none,
-        mutationRetry = mutationRetry ?? const MutationRetryConfig() {
+        mutationRetry = mutationRetry ?? const MutationRetryConfig(),
+        outbox = outbox {
     _fetchEngine = FetchEngine<T>(
       store: store,
       writeToStore: _writeToStore,
@@ -165,6 +183,7 @@ class Syncache<T> {
       notifyObservers: _notifyObservers,
       notifyWatchers: (key) => _notify(key, isFromCache: false),
       performInvalidations: _performMutationInvalidations,
+      outbox: outbox,
     );
 
     // Automatic mutation flush on reconnect: only possible when the
@@ -795,14 +814,41 @@ class Syncache<T> {
   /// );
   /// ```
   ///
+  /// If [payload] is provided, the mutation is persisted to the configured
+  /// [outbox] as a [PendingMutationRecord] so it can survive process death
+  /// and be replayed with [recoverPendingMutations]. The payload is opaque
+  /// to Syncache — make it JSON-safe and self-describing (e.g.
+  /// `{'op': 'updateName', 'userId': 123, 'name': 'X'}`) so your recovery
+  /// resolver can rebuild the [Mutation]. **Throws [StateError]** if a
+  /// payload is given but no outbox is configured: the payload would never
+  /// be persisted, silently breaking the durability the caller asked for.
+  ///
+  /// ```dart
+  /// final handle = await cache.mutate(
+  ///   key: 'user:123',
+  ///   mutation: Mutation<User>(...),
+  ///   payload: {'op': 'updateName', 'userId': 123, 'name': 'X'},
+  /// );
+  /// final outcome = await handle.outcome;
+  /// ```
+  ///
   /// Throws [CacheMissException] if no cached value exists for [key].
   Future<MutationHandle<T>> mutate({
     required String key,
     required Mutation<T> mutation,
     List<String>? invalidates,
     List<String>? invalidateTags,
+    Map<String, Object?>? payload,
   }) async {
     _checkNotDisposed();
+    if (payload != null && outbox == null) {
+      throw StateError(
+        'mutate(payload: ...) was called but no MutationOutbox is configured. '
+        'Pass an outbox to the Syncache constructor — without one the '
+        'payload could never be persisted and the mutation would be lost '
+        'on process death.',
+      );
+    }
     final cached = await store.read(key);
     if (cached == null) {
       throw CacheMissException(key);
@@ -831,9 +877,59 @@ class Syncache<T> {
       optimisticValue: optimisticValue,
       invalidates: invalidates,
       invalidateTags: invalidateTags,
+      payload: payload,
     );
     _mutationQueue.add(pending);
     return pending.handle;
+  }
+
+  /// Replays persisted outbox records as live pending mutations.
+  ///
+  /// Call this once at startup — after constructing [Syncache] with an
+  /// [outbox] and before widgets/UI start fetching — to restore writes that
+  /// were queued when the process last died. For each persisted
+  /// [PendingMutationRecord], [resolve] rebuilds the live [Mutation] from
+  /// the payload the app supplied to [mutate]:
+  ///
+  /// ```dart
+  /// final restored = await cache.recoverPendingMutations((record) async {
+  ///   switch (record.payload['op']) {
+  ///     case 'updateName':
+  ///       return Mutation<User>(
+  ///         apply: (u) => u.copyWith(name: record.payload['name'] as String),
+  ///         send: (_) => api.updateName(
+  ///           record.payload['userId'] as int,
+  ///           record.payload['name'] as String,
+  ///         ),
+  ///       );
+  ///     default:
+  ///       throw UnimplementedError('unknown op ${record.payload['op']}');
+  ///   }
+  /// });
+  /// ```
+  ///
+  /// Recovery preserves enqueue order (records are ordered by their `seq`)
+  /// and does **not** re-apply the optimistic update to the store — the
+  /// optimistic value was already written before the process died. The value
+  /// sent to the server is re-derived as `apply(currentCached)` so the
+  /// intent survives even if the cached entry was refreshed while offline.
+  ///
+  /// Records whose resolver throws (or whose cache entry has disappeared)
+  /// are reported to observers via `SyncacheObserver.onOutboxReplayFailed`
+  /// and left in the outbox — never dropped silently.
+  ///
+  /// If the network is online, the recovered mutations are flushed
+  /// immediately. Returns the number of mutations re-enqueued (0 when no
+  /// outbox is configured or the outbox is empty).
+  ///
+  /// Because replay can double-apply non-idempotent operations, server
+  /// endpoints should be idempotent; put a client-generated operation id in
+  /// the payload for deduplication.
+  Future<int> recoverPendingMutations(
+    Future<Mutation<T>> Function(PendingMutationRecord record) resolve,
+  ) async {
+    _checkNotDisposed();
+    return _mutationQueue.recover(resolve);
   }
 
   /// Returns the number of pending mutations.

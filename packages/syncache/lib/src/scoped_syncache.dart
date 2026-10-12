@@ -6,6 +6,7 @@ import 'fetcher.dart';
 import 'mutation.dart';
 import 'mutation_handle.dart';
 import 'pending_mutation_info.dart';
+import 'pending_mutation_record.dart';
 import 'policy.dart';
 import 'prefetch.dart';
 import 'retry.dart';
@@ -166,6 +167,7 @@ class ScopedSyncache<T> {
     required Mutation<T> mutation,
     List<String>? invalidates,
     List<String>? invalidateTags,
+    Map<String, Object?>? payload,
   }) {
     final scopedInvalidates = invalidates?.map(_scopedKey).toList();
 
@@ -174,6 +176,7 @@ class ScopedSyncache<T> {
       mutation: mutation,
       invalidates: scopedInvalidates,
       invalidateTags: invalidateTags,
+      payload: payload,
     );
   }
 
@@ -272,6 +275,12 @@ class ScopedSyncache<T> {
   /// Processes pending mutations across ALL scopes.
   /// See [Syncache.processPendingMutations].
   Future<void> processPendingMutations() => _cache.processPendingMutations();
+
+  /// See [Syncache.recoverPendingMutations].
+  Future<int> recoverPendingMutations(
+    Future<Mutation<T>> Function(PendingMutationRecord record) resolve,
+  ) =>
+      _cache.recoverPendingMutations(resolve);
 
   Syncache<T> get cache => _cache;
 }
