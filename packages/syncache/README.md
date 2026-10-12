@@ -92,11 +92,102 @@ await cache.mutate(
 
 Failed mutations are automatically queued and retried when the network becomes available.
 
-> **Scope of the promise (0.2.0):** the retry runs *in-process*. When your
-> `Network` implements `ReactiveNetwork` — `syncache_flutter`'s
-> `FlutterNetwork` does — queued mutations are flushed automatically the
-> moment connectivity returns, with no new `mutate()` call. Mutations are not
-> yet persisted across app restarts; durable outbox semantics land in 0.3.0.
+> The retry runs whenever your `Network` reports connectivity — with a
+> `ReactiveNetwork` (such as `syncache_flutter`'s `FlutterNetwork`) queued
+> mutations are flushed automatically the moment connectivity returns, with
+> no new `mutate()` call.
+
+### Offline writes that survive restarts
+
+By default the mutation queue lives in memory: killing the app while offline
+loses queued writes. Configure an **outbox** to make them durable:
+
+```dart
+import 'package:syncache_hive/syncache_hive.dart';
+
+final outbox = await HiveMutationOutbox.open();
+final cache = Syncache<User>(
+  store: store,
+  outbox: outbox, // <- offline writes now survive process death
+  // Decodes optimistic snapshots at recovery (see below).
+  decodeOptimisticSnapshot: (snapshot) => User.fromJson(snapshot as Map<String, dynamic>),
+);
+
+// Pass a payload describing the change and a snapshot of the optimistic
+// value — both are persisted with the record.
+final handle = await cache.mutate(
+  key: 'user:123',
+  mutation: Mutation<User>(
+    apply: (user) => user.copyWith(name: 'New Name'),
+    send: (user) => api.updateUser(user),
+  ),
+  payload: {'op': 'rename', 'userId': 123, 'name': 'New Name'},
+  optimisticSnapshot: user.copyWith(name: 'New Name').toJson(),
+);
+```
+
+Every enqueued mutation is mirrored to the outbox and removed once it settles
+(sent, exhausted, or discarded). On the next startup, replay what's left with
+a **resolver** — a callback that maps a persisted record back to a live
+`Mutation`:
+
+```dart
+final restored = await cache.recoverPendingMutations((record) async {
+  switch (record.payload['op']) {
+    case 'rename':
+      return Mutation<User>(
+        apply: (user) =>
+            user.copyWith(name: record.payload['name'] as String),
+        send: (user) => api.updateUser(user),
+      );
+    default:
+      throw UnimplementedError('unknown op ${record.payload['op']}');
+  }
+});
+print('$restored unsynced write(s) re-enqueued');
+```
+
+Recovery preserves enqueue order, does not double-apply the optimistic update
+(it was already written before the process died), and flushes immediately if
+the network is online. Because the record carries the `optimisticSnapshot`
+(decoded by `decodeOptimisticSnapshot`), replay sends the **exact pre-death
+value** — base-dependent mutations like increments and appends replay
+correctly. Records stored without a snapshot fall back to re-deriving
+`apply(currentCached)`, which can double-apply those same mutations; prefer
+always passing a snapshot. In `syncache_flutter`, `SyncacheScope` runs
+recovery for you on mount:
+
+```dart
+SyncacheScope<User>(
+  cache: cache,
+  resolvePendingMutation: (record) async => /* rebuild the Mutation */,
+  onRecovered: (count) => debugPrint('$count writes restored'),
+  child: MyApp(),
+)
+```
+
+#### Using the outbox without `syncache_hive`
+
+The outbox is a four-method interface in core `syncache` — implement it over
+any persistence you already own, or use the shipped in-memory reference:
+
+```dart
+class MemoryMutationOutbox implements MutationOutbox { /* ... */ }
+
+// A drift cache with a Hive outbox is a valid mix: the outbox backend is
+// independent of the cache Store backend.
+final cache = Syncache<User>(store: driftStore, outbox: myOutbox);
+```
+
+The contract: `save`/`delete`/`clear`/`loadAll` (ordered by `seq`). Failing
+writes never block the cache — they are reported to observers via
+`SyncacheObserver.onOutboxError`. Calling `mutate(payload: ...)` without any
+outbox configured throws `StateError` rather than silently dropping the
+payload.
+
+> **Make endpoints idempotent.** Retries and replay can double-apply
+> non-idempotent operations. Put a client-generated operation id in the
+> payload and deduplicate server-side.
 
 ### What happens when connectivity returns
 
@@ -252,6 +343,22 @@ class AnalyticsObserver extends SyncacheObserver {
   void onCacheMiss(String key) => analytics.track('cache_miss', {'key': key});
 }
 ```
+
+### Known limitations
+
+- **Replay without optimistic snapshots re-derives values.** Outbox records
+  stored without `optimisticSnapshot:` fall back to re-deriving
+  `apply(currentCached)` at recovery, which can double-apply base-dependent
+  mutations (increments, appends) when the cache retained the optimistic
+  state. Always pass a snapshot for exact replay (see
+  [Offline writes that survive restarts](#offline-writes-that-survive-restarts)).
+- **Concurrent `mutate()` calls on the same key have racy optimistic
+  views.** Parallel mutates each apply from the value they read, so the
+  cached value may briefly lag the full sum; the queue re-bases on send and
+  converges to the exact fold after the flush.
+- **Invalidation does not cancel queued mutations.** An invalidated key with
+  queued offline writes still delivers them on reconnect; the
+  server-confirmed value overwrites the (invalidated) cached entry.
 
 ## Storage Backends
 

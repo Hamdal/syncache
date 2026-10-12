@@ -5,6 +5,59 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.3.0
+
+### Added
+
+- **Durable mutation outbox (opt-in).** Pass a `MutationOutbox` to the
+  `Syncache` constructor and every enqueued mutation is mirrored to it as a
+  `PendingMutationRecord` (id, key, monotonic `seq`, caller-supplied JSON
+  `payload`, `queuedAt`). Records are deleted when the mutation settles and
+  are **preserved across `dispose()`**, so a freshly constructed cache can
+  replay unsynced writes after a process restart.
+- `Syncache.recoverPendingMutations(resolve)`: replays persisted records in
+  enqueue order without re-writing the optimistic update, reports records
+  that fail to resolve via `SyncacheObserver.onOutboxReplayFailed` (never
+  dropped silently), and flushes immediately when online. Returns the number
+  of mutations re-enqueued.
+- `Syncache.mutate(payload: ...)`: persists a JSON-safe payload with the
+  record. Throws `StateError` when a payload is given but no outbox is
+  configured — fail loud instead of silently losing durability.
+- **Exact replay via optimistic snapshots.** `Syncache.mutate` accepts
+  `optimisticSnapshot:` — a JSON-safe snapshot of the optimistic value —
+  persisted with the record, and `Syncache` accepts
+  `decodeOptimisticSnapshot:` to decode it at recovery. Replay then sends
+  the *exact pre-death value* instead of re-deriving
+  `apply(currentCached)`, which double-applied base-dependent mutations
+  (increments, appends) when the cache retained the optimistic state.
+  Records stored without a snapshot fall back to re-derivation (documented
+  below); a record that carries a snapshot but no configured codec fails
+  loudly via `onOutboxReplayFailed` instead of silently falling back.
+- `SyncacheObserver.onOutboxError(Object error)`: outbox write failures never
+  block cache operations.
+- `MemoryMutationOutbox`: in-process reference implementation of the outbox
+  contract (survives dispose/recreate, not process death).
+- `PendingMutationInfo.payload` so a UI can describe queued changes.
+- `ScopedSyncache.mutate(payload: ...)` and
+  `ScopedSyncache.recoverPendingMutations`.
+
+### Implementation notes
+
+- When an outbox is configured, `mutate()` resolves only after the record is
+  persisted (a crash after `mutate()` completes can never lose the write).
+  Memory-only behavior (no outbox) is unchanged from 0.2.0.
+- **Replay values come from optimistic snapshots.** Pass
+  `optimisticSnapshot:` to `mutate()` (and configure
+  `decodeOptimisticSnapshot:` on the cache) and replay sends the exact
+  pre-death value. Records stored without a snapshot fall back to
+  re-deriving `apply(currentCached)` — computed only, never re-written to
+  the store — which can double-apply base-dependent mutations when the
+  cache retained the optimistic write. If a replayed record's cache entry
+  is gone, the record is reported via `onOutboxReplayFailed`.
+- Replayed records keep their original ids; the internal id/seq counters are
+  seeded past them so new mutations can never collide with or order before
+  replayed ones.
+
 ## 0.2.0
 
 ### BREAKING CHANGES

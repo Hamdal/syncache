@@ -39,6 +39,13 @@ class PendingMutationInfo {
   /// Current status of this mutation.
   final PendingMutationStatus status;
 
+  /// The caller-supplied payload persisted for this mutation, when the
+  /// mutation was enqueued with one.
+  ///
+  /// Useful for UI like "3 changes waiting to sync" that describes what
+  /// kind of change is waiting.
+  final Map<String, Object?>? payload;
+
   /// Creates a [PendingMutationInfo] instance.
   const PendingMutationInfo({
     required this.id,
@@ -48,6 +55,7 @@ class PendingMutationInfo {
     this.lastAttemptAt,
     this.lastError,
     required this.status,
+    this.payload,
   });
 
   @override

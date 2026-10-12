@@ -3,9 +3,11 @@ import 'dart:async';
 import 'metadata.dart';
 import 'mutation.dart';
 import 'mutation_handle.dart';
+import 'mutation_outbox.dart';
 import 'network.dart';
 import 'observer.dart';
 import 'pending_mutation_info.dart';
+import 'pending_mutation_record.dart';
 import 'retry.dart';
 import 'store.dart';
 import 'stored.dart';
@@ -17,16 +19,38 @@ class PendingMutation<T> {
   final String key;
   final Mutation<T> mutation;
 
+  /// Caller-supplied, JSON-safe description of the change, persisted in the
+  /// outbox (when configured) and handed back to the recovery resolver.
+  final Map<String, Object?>? payload;
+
+  /// Caller-supplied, JSON-safe snapshot of the optimistic value at enqueue
+  /// time. Persisted in the outbox (when configured) and used by recovery
+  /// to replay the exact value instead of re-deriving it.
+  final Object? optimisticSnapshot;
+
   /// Mutable because it's updated when earlier mutations complete and the
   /// base value changes. Subsequent pending mutations for the same key have
   /// their `apply` functions re-applied on top of the new server value.
   T optimisticValue;
+
+  /// Monotonic enqueue order, assigned by [MutationQueue.add]. Replayed
+  /// mutations keep the seq of their persisted record.
+  int seq;
 
   int retryCount;
   final DateTime queuedAt;
   DateTime? lastAttemptAt;
   Object? lastError;
   PendingMutationStatus status;
+
+  /// Whether this mutation was explicitly discarded from the queue
+  /// ([MutationQueue.clear], [MutationQueue.removeById], retry exhaustion).
+  ///
+  /// Used by the outbox save path: a record whose save completes after its
+  /// mutation was discarded must be deleted again. [MutationQueue.dispose]
+  /// deliberately does NOT set this — records must survive dispose so a
+  /// fresh [Syncache] can replay them.
+  bool discarded = false;
   final List<String>? invalidates;
   final List<String>? invalidateTags;
 
@@ -40,9 +64,20 @@ class PendingMutation<T> {
     this.retryCount = 0,
     this.invalidates,
     this.invalidateTags,
-  })  : id = 'mut_${++_mutationIdCounter}',
+    this.payload,
+    this.optimisticSnapshot,
+    this.seq = 0,
+    String? id,
+  })  : id = id ?? 'mut_${++_mutationIdCounter}',
         queuedAt = DateTime.now(),
-        status = PendingMutationStatus.pending;
+        status = PendingMutationStatus.pending {
+    // Replayed mutations keep their original (possibly from a previous
+    // process) id; seed the counter past it so freshly generated ids can
+    // never collide with a still-pending replayed one.
+    final match = RegExp(r'^mut_(\d+)$').firstMatch(this.id);
+    final n = match == null ? null : int.parse(match.group(1)!);
+    if (n != null && n > _mutationIdCounter) _mutationIdCounter = n;
+  }
 
   /// The handle callers receive from `Syncache.mutate`.
   MutationHandle<T> get handle =>
@@ -65,6 +100,19 @@ class PendingMutation<T> {
       lastAttemptAt: lastAttemptAt,
       lastError: lastError,
       status: status,
+      payload: payload,
+    );
+  }
+
+  /// The outbox record describing this mutation for persistence.
+  PendingMutationRecord toRecord() {
+    return PendingMutationRecord(
+      id: id,
+      key: key,
+      seq: seq,
+      payload: payload ?? const {},
+      queuedAt: queuedAt,
+      optimisticSnapshot: optimisticSnapshot,
     );
   }
 }
@@ -79,12 +127,19 @@ class MutationQueue<T> {
   final Store<T> store;
   final Network network;
   final MutationRetryConfig retryConfig;
+  final MutationOutbox? outbox;
+
+  /// Decodes a persisted [PendingMutationRecord.optimisticSnapshot] back
+  /// into a `T`. Null when the cache has no codec configured.
+  final T Function(Object? snapshot)? decodeOptimisticSnapshot;
+
   final void Function(void Function(SyncacheObserver observer)) notifyObservers;
   final NotifyCallback notifyWatchers;
   final InvalidationCallback performInvalidations;
 
   final List<PendingMutation<T>> _pendingMutations = [];
   bool _isProcessingQueue = false;
+  int _seqCounter = 0;
   StreamController<List<PendingMutationInfo>>? _pendingMutationsController;
   StreamController<bool>? _isSyncedController;
   MutationQueue({
@@ -94,6 +149,8 @@ class MutationQueue<T> {
     required this.notifyObservers,
     required this.notifyWatchers,
     required this.performInvalidations,
+    this.outbox,
+    this.decodeOptimisticSnapshot,
   });
 
   int get count => _pendingMutations.length;
@@ -140,10 +197,48 @@ class MutationQueue<T> {
     });
   }
 
-  void add(PendingMutation<T> mutation) {
+  /// Enqueues [mutation] and, when an outbox is configured, persists its
+  /// record before the returned future completes — so a crash after
+  /// `mutate()` resolves can never lose the write. The processing pass
+  /// starts once the save has landed. Failures are reported via
+  /// `onOutboxError` and never propagate.
+  Future<void> add(PendingMutation<T> mutation) {
     _pendingMutations.add(mutation);
     _notifyChanged();
-    processQueue();
+    if (outbox == null) {
+      processQueue();
+      return Future.value();
+    }
+    mutation.seq = ++_seqCounter;
+    return _saveToOutbox(mutation).then((_) => processQueue());
+  }
+
+  /// Persists [mutation] to the outbox. Failures are reported via
+  /// `onOutboxError` and never block the in-memory queue.
+  Future<void> _saveToOutbox(PendingMutation<T> mutation) async {
+    try {
+      await outbox!.save(mutation.toRecord());
+      // The mutation may have been discarded while the save was in flight;
+      // drop the freshly written record so the outbox mirrors the queue.
+      // Dispose does not count as discarding: its records survive so a
+      // restart can replay them.
+      if (mutation.discarded) {
+        await _deleteFromOutbox(mutation.id);
+      }
+    } catch (e) {
+      notifyObservers((o) => o.onOutboxError(e));
+    }
+  }
+
+  /// Removes [id]'s record from the outbox. Failures are reported via
+  /// `onOutboxError`; a lingering record is replayed on the next recovery,
+  /// which is why endpoints should be idempotent.
+  Future<void> _deleteFromOutbox(String id) async {
+    try {
+      await outbox!.delete(id);
+    } catch (e) {
+      notifyObservers((o) => o.onOutboxError(e));
+    }
   }
 
   /// Clears pending mutations. The currently syncing mutation (if any)
@@ -164,7 +259,11 @@ class MutationQueue<T> {
       _pendingMutations.clear();
     }
     for (final mutation in removed) {
+      mutation.discarded = true;
       mutation.settle(MutationDiscarded<T>());
+      if (outbox != null) {
+        unawaited(_deleteFromOutbox(mutation.id));
+      }
     }
     _notifyChanged();
   }
@@ -176,7 +275,11 @@ class MutationQueue<T> {
   bool removeFirst() {
     if (_pendingMutations.isEmpty) return false;
     final removed = _pendingMutations.removeAt(0);
+    removed.discarded = true;
     removed.settle(MutationDiscarded<T>());
+    if (outbox != null) {
+      unawaited(_deleteFromOutbox(removed.id));
+    }
     _notifyChanged();
     return true;
   }
@@ -191,9 +294,100 @@ class MutationQueue<T> {
     final index = _pendingMutations.indexWhere((m) => m.id == id);
     if (index < 0) return false;
     final removed = _pendingMutations.removeAt(index);
+    removed.discarded = true;
     removed.settle(MutationDiscarded<T>());
+    if (outbox != null) {
+      unawaited(_deleteFromOutbox(removed.id));
+    }
     _notifyChanged();
     return true;
+  }
+
+  /// Re-enqueues persisted outbox records as live pending mutations.
+  ///
+  /// Loads all records ordered by seq and, for each one the [resolve]
+  /// callback successfully maps back to a [Mutation], appends it to the
+  /// queue **without re-applying or re-writing** the optimistic update —
+  /// the optimistic value was already written to the store before the
+  /// process died.
+  ///
+  /// The value handed to `send` comes from the record's
+  /// [PendingMutationRecord.optimisticSnapshot] decoded via the cache's
+  /// `decodeOptimisticSnapshot` codec, so replay delivers the exact
+  /// pre-death value. Records stored without a snapshot fall back to
+  /// re-deriving `apply(currentCached)` — see [Syncache.mutate] for why
+  /// providing a snapshot matters.
+  ///
+  /// Records whose resolver throws — or whose cache entry is gone — are
+  /// reported via `onOutboxReplayFailed` and left in the outbox; they are
+  /// never dropped silently.
+  ///
+  /// After recovery the queue is flushed immediately if the network is
+  /// online. Records stay in the outbox until each send succeeds, so a
+  /// crash mid-replay is safe to recover from again.
+  ///
+  /// Returns the number of mutations re-enqueued. Returns 0 when no outbox
+  /// is configured. Intended to be called once at startup, before
+  /// [Syncache.recoverPendingMutations] hands control back to the app.
+  Future<int> recover(
+    Future<Mutation<T>> Function(PendingMutationRecord record) resolve,
+  ) async {
+    final outbox = this.outbox;
+    if (outbox == null) return 0;
+
+    final records = await outbox.loadAll();
+    var reEnqueued = 0;
+    for (final record in records) {
+      try {
+        final cached = await store.read(record.key);
+        if (cached == null) {
+          throw StateError(
+            'No cache entry for key "${record.key}"; '
+            'cannot re-derive the value to send.',
+          );
+        }
+        final mutation = await resolve(record);
+        final T optimisticValue;
+        if (record.optimisticSnapshot != null) {
+          final decode = decodeOptimisticSnapshot;
+          if (decode == null) {
+            throw StateError(
+              'Record ${record.id} carries an optimisticSnapshot but the '
+              'Syncache was constructed without decodeOptimisticSnapshot. '
+              'Configure the codec — otherwise replay would fall back to '
+              're-derivation and could double-apply.',
+            );
+          }
+          // Exact pre-death optimistic value: no re-derivation.
+          optimisticValue = decode(record.optimisticSnapshot);
+        } else {
+          // Documented fallback (no snapshot stored): re-derive the value
+          // from the current cached state. Note this can double-apply when
+          // the cache retained the optimistic write — prefer snapshots.
+          optimisticValue = mutation.apply(cached.value);
+        }
+        // Seed the seq counter past replayed records so mutations enqueued
+        // later in this process order after them.
+        if (record.seq > _seqCounter) _seqCounter = record.seq;
+        _pendingMutations.add(PendingMutation<T>(
+          key: record.key,
+          mutation: mutation,
+          optimisticValue: optimisticValue,
+          payload: record.payload,
+          optimisticSnapshot: record.optimisticSnapshot,
+          seq: record.seq,
+          id: record.id,
+        ));
+        reEnqueued++;
+        _notifyChanged();
+      } catch (e) {
+        notifyObservers((o) => o.onOutboxReplayFailed(record, e));
+      }
+    }
+    if (reEnqueued > 0) {
+      unawaited(processQueue());
+    }
+    return reEnqueued;
   }
 
   void dispose() {
@@ -203,6 +397,9 @@ class MutationQueue<T> {
       mutation.settle(MutationDiscarded<T>());
     }
     _pendingMutations.clear();
+    // Deliberately NOT clearing the outbox here: preserving records across
+    // dispose/recreate is what lets a fresh Syncache replay unsynced
+    // writes after a process restart (see [recover]).
     _isProcessingQueue = false;
     _pendingMutationsController?.close();
     _pendingMutationsController = null;
@@ -273,6 +470,9 @@ class MutationQueue<T> {
         // while in flight, removing the first element would drop an
         // unrelated mutation instead.
         _pendingMutations.remove(pending);
+        if (outbox != null) {
+          unawaited(_deleteFromOutbox(pending.id));
+        }
         pending.settle(MutationSuccess(serverValue));
         _notifyChanged();
       } catch (e, st) {
@@ -287,6 +487,9 @@ class MutationQueue<T> {
           _notifyChanged();
 
           _pendingMutations.remove(pending);
+          if (outbox != null) {
+            unawaited(_deleteFromOutbox(pending.id));
+          }
           notifyObservers((o) => o.onMutationRetryExhausted(
               pending.key, pending.retryCount + 1, e));
           pending.settle(MutationFailure<T>(

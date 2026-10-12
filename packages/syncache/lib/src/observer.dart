@@ -1,3 +1,5 @@
+import 'pending_mutation_record.dart';
+
 /// Observer interface for monitoring Syncache operations.
 ///
 /// Implement this class to receive notifications about cache events
@@ -120,4 +122,20 @@ abstract class SyncacheObserver {
   ///
   /// This is called when the operation is aborted before completion.
   void onFetchCancelled(String key) {}
+
+  /// Called when an outbox write fails.
+  ///
+  /// Outbox failures never block cache operations: the mutation continues
+  /// to be tracked in memory. Note that a failed `delete` leaves a durable
+  /// record behind which will be replayed on the next
+  /// [Syncache.recoverPendingMutations] — make server endpoints idempotent.
+  void onOutboxError(Object error) {}
+
+  /// Called when a persisted mutation record could not be turned back into
+  /// a live mutation during [Syncache.recoverPendingMutations].
+  ///
+  /// The [record] is reported, never dropped silently. The app's resolver
+  /// threw [error] (or the record's cache entry was missing), so the change
+  /// could not be re-enqueued; the record stays in the outbox.
+  void onOutboxReplayFailed(PendingMutationRecord record, Object error) {}
 }

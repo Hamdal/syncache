@@ -7,6 +7,9 @@ export 'src/fetcher.dart'
     show Fetcher, SyncacheRequest, FetchResult, ConditionalFetcher;
 export 'src/memory_store.dart' show MemoryStore;
 export 'src/shared_memory_store.dart' show SharedMemoryStore;
+export 'src/memory_mutation_outbox.dart' show MemoryMutationOutbox;
+export 'src/mutation_outbox.dart' show MutationOutbox;
+export 'src/pending_mutation_record.dart' show PendingMutationRecord;
 export 'src/mutation.dart' show Mutation;
 export 'src/mutation_handle.dart'
     show
