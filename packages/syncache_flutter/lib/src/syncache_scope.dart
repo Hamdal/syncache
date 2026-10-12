@@ -72,6 +72,23 @@ class SyncacheScope<T> extends StatefulWidget {
   /// Configuration for lifecycle behavior.
   final LifecycleConfig config;
 
+  /// Optional resolver used to replay persisted outbox records at startup.
+  ///
+  /// When provided (the cache must have a [MutationOutbox] configured), the
+  /// scope calls [Syncache.recoverPendingMutations] in [State.initState]
+  /// so unsynced offline writes are re-enqueued — and flushed if the
+  /// network is online — before normal usage. Per-record failures are
+  /// reported through `SyncacheObserver.onOutboxReplayFailed`; top-level
+  /// recovery failures are reported via [FlutterError.reportError].
+  ///
+  /// See [Syncache.recoverPendingMutations] for the resolver contract.
+  final Future<Mutation<T>> Function(PendingMutationRecord record)?
+      resolvePendingMutation;
+
+  /// Called after outbox recovery completes with the number of mutations
+  /// re-enqueued. Only invoked when [resolvePendingMutation] is provided.
+  final void Function(int recovered)? onRecovered;
+
   /// The widget below this in the tree.
   final Widget child;
 
@@ -82,6 +99,8 @@ class SyncacheScope<T> extends StatefulWidget {
     required this.child,
     this.network,
     this.config = LifecycleConfig.defaults,
+    this.resolvePendingMutation,
+    this.onRecovered,
   });
 
   /// Retrieves the [Syncache] instance of type [T] from the widget tree.
@@ -145,6 +164,30 @@ class _SyncacheScopeState<T> extends State<SyncacheScope<T>> {
       config: widget.config,
     );
     _observer.attach();
+    _recoverPendingMutations();
+  }
+
+  /// Replays persisted outbox records (when a resolver is configured) so
+  /// the UI reflects unsynced offline state immediately.
+  void _recoverPendingMutations() {
+    final resolver = widget.resolvePendingMutation;
+    if (resolver == null) return;
+    widget.cache.recoverPendingMutations(resolver).then((recovered) {
+      widget.onRecovered?.call(recovered);
+    }).catchError((Object error, StackTrace stackTrace) {
+      // Top-level recovery failures (e.g. the outbox backend is broken)
+      // are surfaced through Flutter's error reporting; per-record
+      // failures were already reported to observers.
+      FlutterError.reportError(
+        FlutterErrorDetails(
+          exception: error,
+          stack: stackTrace,
+          library: 'syncache_flutter',
+          context: ErrorDescription('while recovering pending mutations'),
+        ),
+      );
+      widget.onRecovered?.call(0);
+    });
   }
 
   @override
