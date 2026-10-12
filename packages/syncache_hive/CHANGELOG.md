@@ -1,3 +1,14 @@
+## 0.3.0
+
+### Added
+
+- **`HiveMutationOutbox`**: a durable `MutationOutbox` (see `syncache` 0.3.0)
+  backed by its own Hive box (default name `syncache_outbox`) — deliberately
+  separate from any `HiveStore` cache box, so clearing the cache never
+  destroys unsynced writes. Records persist across close/reopen; corrupted
+  records are skipped and reported via the optional `onError` callback
+  instead of crashing `loadAll`. Safe-close semantics mirror `HiveStore`.
+
 ## 0.2.0
 
 ### Changed

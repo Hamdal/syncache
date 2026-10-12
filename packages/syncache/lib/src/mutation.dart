@@ -26,8 +26,10 @@
 /// If [send] fails, the mutation remains in the sync queue. It is retried
 /// automatically when a [ReactiveNetwork] reports that the network is back
 /// online (e.g. `FlutterNetwork`), when [Syncache.processPendingMutations]
-/// is called, or when the next mutation is enqueued while online. Note that
-/// the queue is in-process only; surviving process death lands in 0.3.0.
+/// is called, or when the next mutation is enqueued while online. Pass a
+/// `payload` (with a [MutationOutbox] configured) to also persist queued
+/// mutations so they survive process death; replay them at startup with
+/// [Syncache.recoverPendingMutations].
 class Mutation<T> {
   /// Transforms the current cached value into the new optimistic value.
   ///

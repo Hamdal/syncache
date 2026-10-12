@@ -92,11 +92,93 @@ await cache.mutate(
 
 Failed mutations are automatically queued and retried when the network becomes available.
 
-> **Scope of the promise (0.2.0):** the retry runs *in-process*. When your
-> `Network` implements `ReactiveNetwork` — `syncache_flutter`'s
-> `FlutterNetwork` does — queued mutations are flushed automatically the
-> moment connectivity returns, with no new `mutate()` call. Mutations are not
-> yet persisted across app restarts; durable outbox semantics land in 0.3.0.
+> The retry runs whenever your `Network` reports connectivity — with a
+> `ReactiveNetwork` (such as `syncache_flutter`'s `FlutterNetwork`) queued
+> mutations are flushed automatically the moment connectivity returns, with
+> no new `mutate()` call.
+
+### Offline writes that survive restarts
+
+By default the mutation queue lives in memory: killing the app while offline
+loses queued writes. Configure an **outbox** to make them durable:
+
+```dart
+import 'package:syncache_hive/syncache_hive.dart';
+
+final outbox = await HiveMutationOutbox.open();
+final cache = Syncache<User>(
+  store: store,
+  outbox: outbox, // <- offline writes now survive process death
+);
+
+// Pass a payload describing the change — it is persisted with the record.
+final handle = await cache.mutate(
+  key: 'user:123',
+  mutation: Mutation<User>(
+    apply: (user) => user.copyWith(name: 'New Name'),
+    send: (user) => api.updateUser(user),
+  ),
+  payload: {'op': 'rename', 'userId': 123, 'name': 'New Name'},
+);
+```
+
+Every enqueued mutation is mirrored to the outbox and removed once it settles
+(sent, exhausted, or discarded). On the next startup, replay what's left with
+a **resolver** — a callback that maps a persisted record back to a live
+`Mutation`:
+
+```dart
+final restored = await cache.recoverPendingMutations((record) async {
+  switch (record.payload['op']) {
+    case 'rename':
+      return Mutation<User>(
+        apply: (user) =>
+            user.copyWith(name: record.payload['name'] as String),
+        send: (user) => api.updateUser(user),
+      );
+    default:
+      throw UnimplementedError('unknown op ${record.payload['op']}');
+  }
+});
+print('$restored unsynced write(s) re-enqueued');
+```
+
+Recovery preserves enqueue order, does not double-apply the optimistic update
+(it was already written before the process died), and flushes immediately if
+the network is online. In `syncache_flutter`, `SyncacheScope` runs recovery
+for you on mount:
+
+```dart
+SyncacheScope<User>(
+  cache: cache,
+  resolvePendingMutation: (record) async => /* rebuild the Mutation */,
+  onRecovered: (count) => debugPrint('$count writes restored'),
+  child: MyApp(),
+)
+```
+
+#### Using the outbox without `syncache_hive`
+
+The outbox is a four-method interface in core `syncache` — implement it over
+any persistence you already own, or use the shipped in-memory reference:
+
+```dart
+class MemoryMutationOutbox implements MutationOutbox { /* ... */ }
+
+// A drift cache with a Hive outbox is a valid mix: the outbox backend is
+// independent of the cache Store backend.
+final cache = Syncache<User>(store: driftStore, outbox: myOutbox);
+```
+
+The contract: `save`/`delete`/`clear`/`loadAll` (ordered by `seq`). Failing
+writes never block the cache — they are reported to observers via
+`SyncacheObserver.onOutboxError`. Calling `mutate(payload: ...)` without any
+outbox configured throws `StateError` rather than silently dropping the
+payload.
+
+> **Make endpoints idempotent.** Retries and replay can double-apply
+> non-idempotent operations. Put a client-generated operation id in the
+> payload and deduplicate server-side.
 
 ### What happens when connectivity returns
 

@@ -44,8 +44,7 @@ class MapOutbox implements MutationOutbox {
 
   @override
   Future<List<PendingMutationRecord>> loadAll() async {
-    final all = records.values.toList()
-      ..sort((a, b) => a.seq.compareTo(b.seq));
+    final all = records.values.toList()..sort((a, b) => a.seq.compareTo(b.seq));
     return all;
   }
 }
@@ -176,8 +175,7 @@ void main() {
         ),
         payload: {'op': 'rename'},
       );
-      expect(cache.pendingMutationsSnapshot.single.payload,
-          {'op': 'rename'});
+      expect(cache.pendingMutationsSnapshot.single.payload, {'op': 'rename'});
     });
 
     test('removePendingMutation deletes the record', () async {
@@ -260,8 +258,7 @@ void main() {
           reason: 'exhausted mutations must not be replayed');
     });
 
-    test('outbox save failure does not block the optimistic apply',
-        () async {
+    test('outbox save failure does not block the optimistic apply', () async {
       outbox.saveErrors.add(Exception('disk full'));
       await seed('k');
       final storedBefore = await store.read('k');
@@ -304,8 +301,7 @@ void main() {
   });
 
   group('mutate payload guard', () {
-    test('throws StateError when payload is given without an outbox',
-        () async {
+    test('throws StateError when payload is given without an outbox', () async {
       final cache = Syncache<String>(store: MemoryStore<String>());
       addTearDown(cache.dispose);
       await cache.set(key: 'k', value: 'initial');
@@ -349,7 +345,10 @@ void main() {
       final cache = Syncache<String>(store: MemoryStore<String>());
       addTearDown(cache.dispose);
 
-      expect(await cache.recoverPendingMutations((_) async => throw UnimplementedError()), 0);
+      expect(
+          await cache
+              .recoverPendingMutations((_) async => throw UnimplementedError()),
+          0);
     });
 
     test('simulated restart: replays in seq order and flushes when online',
@@ -425,8 +424,7 @@ void main() {
       await offline.mutate(
         key: 'k',
         mutation: Mutation<String>(
-          apply: (current) =>
-              'count:${int.parse(current.split(':')[1]) + 1}',
+          apply: (current) => 'count:${int.parse(current.split(':')[1]) + 1}',
           send: (_) async => 'server',
         ),
         payload: {'op': 'increment'},

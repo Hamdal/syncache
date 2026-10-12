@@ -15,6 +15,7 @@ An offline-first cache and sync engine for Dart and Flutter applications.
 - **Multiple caching policies** - offlineFirst, cacheOnly, networkOnly, refresh, staleWhileRefresh
 - **Reactive streams** - Subscribe to cache updates with `watch()`
 - **Optimistic mutations** - Update UI immediately while syncing in background
+- **Durable offline writes** - Queue mutations to an outbox and replay them after restarts
 - **Tag-based invalidation** - Group and invalidate related cache entries
 - **Persistent storage** - Store cache data on disk with Hive backend
 - **Flutter integration** - Widgets, lifecycle management, connectivity detection

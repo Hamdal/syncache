@@ -34,8 +34,9 @@ class _DurableOutboxDemoScreenState extends State<DurableOutboxDemoScreen> {
   // outbox keeps queued mutation records. In a real app you would use
   // HiveStore + HiveMutationOutbox (syncache_hive) to survive actual
   // process death.
-  final SharedMemoryStore<User> _store =
-      SharedMemoryStore<User>(namespace: 'outbox-demo');
+  final SharedMemoryStore<User> _store = SharedMemoryStore<User>(
+    namespace: 'outbox-demo',
+  );
   final MemoryMutationOutbox _outbox = MemoryMutationOutbox();
 
   final _DemoNetwork _network = _DemoNetwork();
@@ -80,18 +81,14 @@ class _DurableOutboxDemoScreenState extends State<DurableOutboxDemoScreen> {
   /// "App startup": seed the cache if needed, then replay the outbox —
   /// exactly what SyncacheScope does with `resolvePendingMutation`.
   Future<void> _bootstrap() async {
-    await _cache.set(
-      key: 'user:profile',
-      value: await fakeApi.fetchUser(),
-    );
+    await _cache.set(key: 'user:profile', value: await fakeApi.fetchUser());
     await _refreshUser();
 
     final resolved = await _cache.recoverPendingMutations((record) async {
       // In a real app, switch on record.payload['op'] and rebuild the
       // Mutation from the serialized change.
       return Mutation<User>(
-        apply: (user) =>
-            user.copyWith(name: record.payload['name'] as String),
+        apply: (user) => user.copyWith(name: record.payload['name'] as String),
         send: (user) => fakeApi.updateUser(user),
       );
     });
@@ -129,7 +126,8 @@ class _DurableOutboxDemoScreenState extends State<DurableOutboxDemoScreen> {
       payload: {'op': 'rename', 'name': newName},
     );
     _appendLog(
-        _network.isOnline ? 'Mutated & synced "$newName"' : 'Queued "$newName"');
+      _network.isOnline ? 'Mutated & synced "$newName"' : 'Queued "$newName"',
+    );
     await _refreshUser();
   }
 
@@ -165,8 +163,10 @@ class _DurableOutboxDemoScreenState extends State<DurableOutboxDemoScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text('Session $_session',
-                            style: Theme.of(context).textTheme.titleMedium),
+                        Text(
+                          'Session $_session',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
                         Switch(
                           value: _network.isOnline,
                           onChanged: (online) {
@@ -176,10 +176,12 @@ class _DurableOutboxDemoScreenState extends State<DurableOutboxDemoScreen> {
                         ),
                       ],
                     ),
-                    Text(_network.isOnline ? 'Online' : 'Offline',
-                        style: TextStyle(
-                          color: _network.isOnline ? Colors.green : Colors.red,
-                        )),
+                    Text(
+                      _network.isOnline ? 'Online' : 'Offline',
+                      style: TextStyle(
+                        color: _network.isOnline ? Colors.green : Colors.red,
+                      ),
+                    ),
                     const SizedBox(height: 12),
                     Text(
                       _user?.name ?? 'No user loaded',
@@ -191,8 +193,7 @@ class _DurableOutboxDemoScreenState extends State<DurableOutboxDemoScreen> {
                           ? 'Queue: empty'
                           : 'Queue: ${_pending.length} waiting to sync',
                       style: TextStyle(
-                        color:
-                            _pending.isEmpty ? Colors.grey : Colors.orange,
+                        color: _pending.isEmpty ? Colors.grey : Colors.orange,
                       ),
                     ),
                   ],
@@ -219,17 +220,23 @@ class _DurableOutboxDemoScreenState extends State<DurableOutboxDemoScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Event log',
-                        style: Theme.of(context).textTheme.titleSmall),
+                    Text(
+                      'Event log',
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
                     const SizedBox(height: 8),
                     if (_log.isEmpty)
                       const Text('Go offline, mutate, then restart the app.')
                     else
-                      ..._log.map((line) => Padding(
-                            padding: const EdgeInsets.only(bottom: 4),
-                            child: Text(line,
-                                style: Theme.of(context).textTheme.bodySmall),
-                          )),
+                      ..._log.map(
+                        (line) => Padding(
+                          padding: const EdgeInsets.only(bottom: 4),
+                          child: Text(
+                            line,
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -255,14 +262,14 @@ class _DemoNetwork implements Network {
 class _DemoObserver extends SyncacheObserver {
   final void Function(Object error) _onOutboxError;
   final void Function(PendingMutationRecord record, Object error)
-      _onOutboxReplayFailed;
+  _onOutboxReplayFailed;
 
   _DemoObserver({
     required void Function(Object error) onOutboxError,
     required void Function(PendingMutationRecord record, Object error)
-        onOutboxReplayFailed,
-  })  : _onOutboxError = onOutboxError,
-        _onOutboxReplayFailed = onOutboxReplayFailed;
+    onOutboxReplayFailed,
+  }) : _onOutboxError = onOutboxError,
+       _onOutboxReplayFailed = onOutboxReplayFailed;
 
   @override
   void onOutboxError(Object error) => _onOutboxError(error);
