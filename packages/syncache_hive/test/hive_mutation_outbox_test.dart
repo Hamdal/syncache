@@ -88,6 +88,43 @@ void main() {
       expect(all.map((r) => r.id), ['a', 'b']);
     });
 
+    test('optimisticSnapshot survives close/reopen', () async {
+      final name = boxName();
+      final outbox = await HiveMutationOutbox.open(boxName: name);
+      await outbox.save(record('a', 1, payload: {'op': 'x'}));
+      await outbox.save(
+        PendingMutationRecord(
+          id: 'b',
+          key: 'k',
+          seq: 2,
+          payload: {'op': 'y'},
+          queuedAt: DateTime.now(),
+          optimisticSnapshot: {
+            'name': 'Ada',
+            'tags': [1, 2],
+          },
+        ),
+      );
+      await outbox.close();
+
+      final reopened = await HiveMutationOutbox.open(boxName: name);
+      addTearDown(reopened.close);
+      final all = await reopened.loadAll();
+      expect(all, hasLength(2));
+      expect(
+        all[0].optimisticSnapshot,
+        isNull,
+        reason: 'records saved without a snapshot stay null',
+      );
+      expect(
+        all[1].optimisticSnapshot,
+        {
+          'name': 'Ada',
+          'tags': [1, 2],
+        },
+      );
+    });
+
     test('corrupted records are skipped and reported, not crashed on',
         () async {
       final name = boxName();

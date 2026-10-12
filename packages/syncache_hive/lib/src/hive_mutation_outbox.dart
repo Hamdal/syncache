@@ -111,6 +111,9 @@ class HiveMutationOutbox implements MutationOutbox {
         'seq': record.seq,
         'payload': record.payload,
         'queuedAtMs': record.queuedAt.millisecondsSinceEpoch,
+        // JSON-safe by contract; Hive preserves maps/lists/scalars as-is.
+        if (record.optimisticSnapshot != null)
+          'optimisticSnapshot': record.optimisticSnapshot,
       });
     });
   }
@@ -161,6 +164,7 @@ class HiveMutationOutbox implements MutationOutbox {
       queuedAt: queuedAtMs is int
           ? DateTime.fromMillisecondsSinceEpoch(queuedAtMs)
           : throw FormatException('Malformed queuedAtMs', raw),
+      optimisticSnapshot: raw['optimisticSnapshot'],
     );
   }
 }

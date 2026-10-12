@@ -165,6 +165,25 @@ void main() {
       expect((await store.read('k'))!.value, 'server');
     });
 
+    test('enqueue persists the snapshot in the record', () async {
+      await seed('k');
+      await cache.mutate(
+        key: 'k',
+        mutation: Mutation<String>(
+          apply: (_) => 'optimistic',
+          send: (_) async => 'server',
+        ),
+        payload: {'op': 'rename'},
+        optimisticSnapshot: 'optimistic-json',
+      );
+      await pumpUntil(() => outbox.records.isNotEmpty);
+
+      expect(
+        outbox.records.values.single.optimisticSnapshot,
+        'optimistic-json',
+      );
+    });
+
     test('pendingMutationsSnapshot exposes the payload', () async {
       await seed('k');
       await cache.mutate(
@@ -411,7 +430,140 @@ void main() {
           reason: 'successful replay deletes records');
     });
 
-    test('replay re-derives the value via apply instead of double-applying',
+    test(
+        'restart with snapshots replays the exact pre-death values '
+        '(no double-apply)', () async {
+      final store = MemoryStore<int>();
+      final outbox = MapOutbox();
+      final offline = Syncache<int>(
+        store: store,
+        network: FakeNetwork(online: false),
+        outbox: outbox,
+      );
+      await offline.set(key: 'k', value: 0);
+      // Five offline increments; each snapshot captures its own optimistic
+      // value, exactly as a JSON-safe snapshot would in a real app.
+      for (var i = 1; i <= 5; i++) {
+        final current = (await store.read('k'))!.value;
+        await offline.mutate(
+          key: 'k',
+          mutation: Mutation<int>(
+            apply: (c) => c + 1,
+            send: (v) async => v,
+          ),
+          payload: {'op': 'increment', 'n': i},
+          optimisticSnapshot: current + 1,
+        );
+      }
+      // The store holds the optimistic fold (5) before the "kill".
+      expect((await store.read('k'))!.value, 5);
+      offline.dispose();
+
+      final online = Syncache<int>(
+        store: store,
+        network: FakeNetwork(online: true),
+        outbox: outbox,
+        decodeOptimisticSnapshot: (snapshot) => snapshot as int,
+      );
+      addTearDown(online.dispose);
+
+      final restored = await online.recoverPendingMutations((record) async {
+        return Mutation<int>(
+          apply: (c) => c + 1,
+          send: (v) async => v,
+        );
+      });
+      expect(restored, 5);
+      await pumpUntil(() => outbox.records.isEmpty);
+
+      // Exact replay: the final value equals the pre-death optimistic
+      // fold — NOT 2x it (which re-derivation would produce).
+      expect((await store.read('k'))!.value, 5);
+    });
+
+    test('snapshot without a decoder fails the record loudly', () async {
+      final store = MemoryStore<int>();
+      final outbox = MapOutbox();
+      final observer = OutboxObserver();
+      final offline = Syncache<int>(
+        store: store,
+        network: FakeNetwork(online: false),
+        outbox: outbox,
+      );
+      await offline.set(key: 'k', value: 0);
+      await offline.mutate(
+        key: 'k',
+        mutation: Mutation<int>(
+          apply: (c) => c + 1,
+          send: (v) async => v,
+        ),
+        payload: {'op': 'increment'},
+        optimisticSnapshot: 1,
+      );
+      offline.dispose();
+
+      // No decodeOptimisticSnapshot configured: replay must NOT silently
+      // fall back to re-derivation (which could double-apply).
+      final online = Syncache<int>(
+        store: store,
+        network: FakeNetwork(online: true),
+        outbox: outbox,
+        observers: [observer],
+      );
+      addTearDown(online.dispose);
+
+      final restored = await online.recoverPendingMutations((_) async =>
+          Mutation<int>(apply: (c) => c + 1, send: (v) async => v));
+
+      expect(restored, 0);
+      expect(observer.replayFailed, hasLength(1));
+      expect(observer.replayErrors.single, isA<StateError>());
+      expect(outbox.records, hasLength(1),
+          reason: 'failed records are never dropped silently');
+      expect((await store.read('k'))!.value, 1,
+          reason: 'no silent double-apply — record reported instead');
+    });
+
+    test('decoder throwing fails the record loudly', () async {
+      final store = MemoryStore<int>();
+      final outbox = MapOutbox();
+      final observer = OutboxObserver();
+      final offline = Syncache<int>(
+        store: store,
+        network: FakeNetwork(online: false),
+        outbox: outbox,
+      );
+      await offline.set(key: 'k', value: 0);
+      await offline.mutate(
+        key: 'k',
+        mutation: Mutation<int>(
+          apply: (c) => c + 1,
+          send: (v) async => v,
+        ),
+        payload: {'op': 'increment'},
+        optimisticSnapshot: {'v': 1},
+      );
+      offline.dispose();
+
+      final online = Syncache<int>(
+        store: store,
+        network: FakeNetwork(online: true),
+        outbox: outbox,
+        observers: [observer],
+        decodeOptimisticSnapshot: (snapshot) =>
+            throw const FormatException('bad snapshot'),
+      );
+      addTearDown(online.dispose);
+
+      final restored = await online.recoverPendingMutations((_) async =>
+          Mutation<int>(apply: (c) => c + 1, send: (v) async => v));
+
+      expect(restored, 0);
+      expect(observer.replayFailed, hasLength(1));
+      expect(observer.replayErrors.single, isA<FormatException>());
+    });
+
+    test('replay without a snapshot falls back to apply(currentCached)',
         () async {
       final store = MemoryStore<String>();
       final outbox = MapOutbox();
@@ -452,10 +604,10 @@ void main() {
       });
       await pumpUntil(() => outbox.records.isEmpty);
 
-      // apply was re-derived exactly once to compute the value to send...
+      // Fallback (documented, can double-apply on retained optimistic
+      // state): apply re-derived once; the send carried the re-derived
+      // value ('count:1' -> 'count:2').
       expect(applyCalls, 1);
-      // ...and the send carried the re-derived value ('count:1' -> 'count:2'),
-      // not a stale base.
       expect((await store.read('k'))!.value, 'count:2');
     });
 

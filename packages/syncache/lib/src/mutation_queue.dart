@@ -23,6 +23,11 @@ class PendingMutation<T> {
   /// outbox (when configured) and handed back to the recovery resolver.
   final Map<String, Object?>? payload;
 
+  /// Caller-supplied, JSON-safe snapshot of the optimistic value at enqueue
+  /// time. Persisted in the outbox (when configured) and used by recovery
+  /// to replay the exact value instead of re-deriving it.
+  final Object? optimisticSnapshot;
+
   /// Mutable because it's updated when earlier mutations complete and the
   /// base value changes. Subsequent pending mutations for the same key have
   /// their `apply` functions re-applied on top of the new server value.
@@ -60,6 +65,7 @@ class PendingMutation<T> {
     this.invalidates,
     this.invalidateTags,
     this.payload,
+    this.optimisticSnapshot,
     this.seq = 0,
     String? id,
   })  : id = id ?? 'mut_${++_mutationIdCounter}',
@@ -106,6 +112,7 @@ class PendingMutation<T> {
       seq: seq,
       payload: payload ?? const {},
       queuedAt: queuedAt,
+      optimisticSnapshot: optimisticSnapshot,
     );
   }
 }
@@ -121,6 +128,11 @@ class MutationQueue<T> {
   final Network network;
   final MutationRetryConfig retryConfig;
   final MutationOutbox? outbox;
+
+  /// Decodes a persisted [PendingMutationRecord.optimisticSnapshot] back
+  /// into a `T`. Null when the cache has no codec configured.
+  final T Function(Object? snapshot)? decodeOptimisticSnapshot;
+
   final void Function(void Function(SyncacheObserver observer)) notifyObservers;
   final NotifyCallback notifyWatchers;
   final InvalidationCallback performInvalidations;
@@ -138,6 +150,7 @@ class MutationQueue<T> {
     required this.notifyWatchers,
     required this.performInvalidations,
     this.outbox,
+    this.decodeOptimisticSnapshot,
   });
 
   int get count => _pendingMutations.length;
@@ -296,9 +309,14 @@ class MutationQueue<T> {
   /// callback successfully maps back to a [Mutation], appends it to the
   /// queue **without re-applying or re-writing** the optimistic update —
   /// the optimistic value was already written to the store before the
-  /// process died. The value handed to `send` is re-derived as
-  /// `apply(currentCached)` so the user's intent is preserved even if the
-  /// cached entry was refreshed while offline.
+  /// process died.
+  ///
+  /// The value handed to `send` comes from the record's
+  /// [PendingMutationRecord.optimisticSnapshot] decoded via the cache's
+  /// `decodeOptimisticSnapshot` codec, so replay delivers the exact
+  /// pre-death value. Records stored without a snapshot fall back to
+  /// re-deriving `apply(currentCached)` — see [Syncache.mutate] for why
+  /// providing a snapshot matters.
   ///
   /// Records whose resolver throws — or whose cache entry is gone — are
   /// reported via `onOutboxReplayFailed` and left in the outbox; they are
@@ -329,7 +347,25 @@ class MutationQueue<T> {
           );
         }
         final mutation = await resolve(record);
-        final optimisticValue = mutation.apply(cached.value);
+        final T optimisticValue;
+        if (record.optimisticSnapshot != null) {
+          final decode = decodeOptimisticSnapshot;
+          if (decode == null) {
+            throw StateError(
+              'Record ${record.id} carries an optimisticSnapshot but the '
+              'Syncache was constructed without decodeOptimisticSnapshot. '
+              'Configure the codec — otherwise replay would fall back to '
+              're-derivation and could double-apply.',
+            );
+          }
+          // Exact pre-death optimistic value: no re-derivation.
+          optimisticValue = decode(record.optimisticSnapshot);
+        } else {
+          // Documented fallback (no snapshot stored): re-derive the value
+          // from the current cached state. Note this can double-apply when
+          // the cache retained the optimistic write — prefer snapshots.
+          optimisticValue = mutation.apply(cached.value);
+        }
         // Seed the seq counter past replayed records so mutations enqueued
         // later in this process order after them.
         if (record.seq > _seqCounter) _seqCounter = record.seq;
@@ -338,6 +374,7 @@ class MutationQueue<T> {
           mutation: mutation,
           optimisticValue: optimisticValue,
           payload: record.payload,
+          optimisticSnapshot: record.optimisticSnapshot,
           seq: record.seq,
           id: record.id,
         ));

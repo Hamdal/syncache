@@ -22,6 +22,16 @@ class PendingMutationRecord {
   /// to rebuild the live `Mutation` (e.g. switching on an `'op'` field).
   final Map<String, Object?> payload;
 
+  /// Caller-supplied, JSON-safe snapshot of the optimistic value at enqueue
+  /// time (the value [Syncache.mutate] applied to the cache).
+  ///
+  /// When provided (and a `decodeOptimisticSnapshot` codec is configured on
+  /// the cache), recovery replays the *exact* pre-death value instead of
+  /// re-deriving it via `apply(currentCached)` — which would double-apply
+  /// when the cache retained the optimistic state. Null means the caller
+  /// opted out and recovery falls back to re-derivation.
+  final Object? optimisticSnapshot;
+
   /// When the mutation was originally enqueued.
   final DateTime queuedAt;
 
@@ -32,6 +42,7 @@ class PendingMutationRecord {
     required this.seq,
     required this.payload,
     required this.queuedAt,
+    this.optimisticSnapshot,
   });
 
   @override

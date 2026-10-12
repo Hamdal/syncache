@@ -168,6 +168,7 @@ class ScopedSyncache<T> {
     List<String>? invalidates,
     List<String>? invalidateTags,
     Map<String, Object?>? payload,
+    Object? optimisticSnapshot,
   }) {
     final scopedInvalidates = invalidates?.map(_scopedKey).toList();
 
@@ -177,6 +178,7 @@ class ScopedSyncache<T> {
       invalidates: scopedInvalidates,
       invalidateTags: invalidateTags,
       payload: payload,
+      optimisticSnapshot: optimisticSnapshot,
     );
   }
 

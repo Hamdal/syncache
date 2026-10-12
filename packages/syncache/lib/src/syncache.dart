@@ -103,6 +103,18 @@ class Syncache<T> {
   /// death. When null (the default) the queue is memory-only.
   final MutationOutbox? outbox;
 
+  /// Decodes a persisted optimistic snapshot (see [mutate]) back into a
+  /// `T` during [recoverPendingMutations].
+  ///
+  /// Provide this when mutations are enqueued with `optimisticSnapshot`:
+  /// replay then sends the exact pre-death value instead of re-deriving
+  /// `apply(currentCached)` — which can double-apply base-dependent
+  /// mutations (increments, appends) after a crash. If a record carries a
+  /// snapshot but no codec is configured, recovery reports the record via
+  /// `SyncacheObserver.onOutboxReplayFailed` rather than silently falling
+  /// back.
+  final T Function(Object? snapshot)? decodeOptimisticSnapshot;
+
   late final FetchEngine<T> _fetchEngine;
   late final MutationQueue<T> _mutationQueue;
 
@@ -166,6 +178,7 @@ class Syncache<T> {
     RetryConfig? defaultRetry,
     MutationRetryConfig? mutationRetry,
     MutationOutbox? outbox,
+    this.decodeOptimisticSnapshot,
   })  : network = network ?? const AlwaysOnline(),
         observers = observers ?? const [],
         defaultRetry = defaultRetry ?? RetryConfig.none,
@@ -184,6 +197,7 @@ class Syncache<T> {
       notifyWatchers: (key) => _notify(key, isFromCache: false),
       performInvalidations: _performMutationInvalidations,
       outbox: outbox,
+      decodeOptimisticSnapshot: decodeOptimisticSnapshot,
     );
 
     // Automatic mutation flush on reconnect: only possible when the
@@ -823,11 +837,21 @@ class Syncache<T> {
   /// payload is given but no outbox is configured: the payload would never
   /// be persisted, silently breaking the durability the caller asked for.
   ///
+  /// If [optimisticSnapshot] is provided, the *optimistic value* (the value
+  /// [mutation.apply] just produced) is persisted alongside the payload as
+  /// a JSON-safe snapshot. At recovery, with `decodeOptimisticSnapshot`
+  /// configured on the cache, replay sends the exact pre-death value.
+  /// Without a snapshot, replay falls back to re-deriving
+  /// `apply(currentCached)` — which double-applies base-dependent mutations
+  /// (increments, appends) when the cache retained the optimistic state, so
+  /// prefer passing a snapshot (e.g. `optimisticSnapshot: user.toJson()`).
+  ///
   /// ```dart
   /// final handle = await cache.mutate(
   ///   key: 'user:123',
   ///   mutation: Mutation<User>(...),
   ///   payload: {'op': 'updateName', 'userId': 123, 'name': 'X'},
+  ///   optimisticSnapshot: user.toJson(),
   /// );
   /// final outcome = await handle.outcome;
   /// ```
@@ -839,14 +863,15 @@ class Syncache<T> {
     List<String>? invalidates,
     List<String>? invalidateTags,
     Map<String, Object?>? payload,
+    Object? optimisticSnapshot,
   }) async {
     _checkNotDisposed();
-    if (payload != null && outbox == null) {
+    if ((payload != null || optimisticSnapshot != null) && outbox == null) {
       throw StateError(
-        'mutate(payload: ...) was called but no MutationOutbox is configured. '
-        'Pass an outbox to the Syncache constructor — without one the '
-        'payload could never be persisted and the mutation would be lost '
-        'on process death.',
+        'mutate(payload: ... / optimisticSnapshot: ...) was called but no '
+        'MutationOutbox is configured. Pass an outbox to the Syncache '
+        'constructor — without one the data could never be persisted and '
+        'the mutation would be lost on process death.',
       );
     }
     final cached = await store.read(key);
@@ -878,6 +903,7 @@ class Syncache<T> {
       invalidates: invalidates,
       invalidateTags: invalidateTags,
       payload: payload,
+      optimisticSnapshot: optimisticSnapshot,
     );
     await _mutationQueue.add(pending);
     return pending.handle;
@@ -910,9 +936,13 @@ class Syncache<T> {
   ///
   /// Recovery preserves enqueue order (records are ordered by their `seq`)
   /// and does **not** re-apply the optimistic update to the store — the
-  /// optimistic value was already written before the process died. The value
-  /// sent to the server is re-derived as `apply(currentCached)` so the
-  /// intent survives even if the cached entry was refreshed while offline.
+  /// optimistic value was already written before the process died.
+  ///
+  /// The value sent to the server comes from each record's
+  /// `optimisticSnapshot` (decoded via the cache's `decodeOptimisticSnapshot`
+  /// codec), reproducing the exact pre-death value. Records stored without a
+  /// snapshot fall back to re-deriving `apply(currentCached)`; see
+  /// [mutate] for why snapshots matter and how to provide them.
   ///
   /// Records whose resolver throws (or whose cache entry has disappeared)
   /// are reported to observers via `SyncacheObserver.onOutboxReplayFailed`
