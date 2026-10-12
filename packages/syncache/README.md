@@ -344,6 +344,22 @@ class AnalyticsObserver extends SyncacheObserver {
 }
 ```
 
+### Known limitations
+
+- **Replay without optimistic snapshots re-derives values.** Outbox records
+  stored without `optimisticSnapshot:` fall back to re-deriving
+  `apply(currentCached)` at recovery, which can double-apply base-dependent
+  mutations (increments, appends) when the cache retained the optimistic
+  state. Always pass a snapshot for exact replay (see
+  [Offline writes that survive restarts](#offline-writes-that-survive-restarts)).
+- **Concurrent `mutate()` calls on the same key have racy optimistic
+  views.** Parallel mutates each apply from the value they read, so the
+  cached value may briefly lag the full sum; the queue re-bases on send and
+  converges to the exact fold after the flush.
+- **Invalidation does not cancel queued mutations.** An invalidated key with
+  queued offline writes still delivers them on reconnect; the
+  server-confirmed value overwrites the (invalidated) cached entry.
+
 ## Storage Backends
 
 ### MemoryStore

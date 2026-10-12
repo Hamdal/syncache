@@ -32,3 +32,6 @@ coverage/
 # OS
 .DS_Store
 Thumbs.db
+
+# Local engineering docs (milestones, decision records) — kept out of the public repo
+docs/
