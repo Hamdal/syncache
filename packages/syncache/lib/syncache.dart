@@ -1,3 +1,13 @@
+/// An offline-first cache and sync engine for Dart applications.
+///
+/// This library exports the complete public API: [Syncache] (the engine),
+/// [Store] implementations ([MemoryStore], [SharedMemoryStore]), caching
+/// [Policy] variants, reactive streams, optimistic [Mutation] with a
+/// durable [MutationOutbox], typed entries ([SyncacheEntry]), stats
+/// ([SyncacheStats]), and debug tooling ([SyncacheDebug]).
+///
+/// Flutter integration lives in `syncache_flutter`; persistent backends in
+/// `syncache_hive` and `syncache_drift`.
 library syncache;
 
 export 'src/cache_result.dart' show CacheResult, CacheResultMeta;
@@ -36,7 +46,9 @@ export 'src/prefetch.dart'
 export 'src/query_key.dart' show QueryKey, QueryKeyStringExtension;
 export 'src/retry.dart' show RetryConfig, MutationRetryConfig;
 export 'src/scoped_syncache.dart' show ScopedSyncache;
+export 'src/syncache_entry.dart' show SyncacheEntry;
 export 'src/syncache_stats.dart' show SyncacheStats, SyncacheCounter;
+export 'src/debug.dart' show SyncacheDebug;
 export 'src/store.dart' show Store, TaggableStore, BoundedStore, IterableStore;
 export 'src/stored.dart' show Stored;
 export 'src/syncache.dart' show Syncache;

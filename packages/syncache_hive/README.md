@@ -21,8 +21,8 @@ Add `syncache_hive` to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  syncache: ^0.4.0
-  syncache_hive: ^0.4.0
+  syncache: ^0.5.0
+  syncache_hive: ^0.5.0
   hive_ce: ^2.20.2
 ```
 
@@ -53,7 +53,24 @@ import 'package:hive_ce/hive_ce.dart';
 import 'package:syncache/syncache.dart';
 import 'package:syncache_hive/syncache_hive.dart';
 
-void main() async {
+class User {
+  final int id;
+  final String name;
+  const User({required this.id, required this.name});
+
+  Map<String, dynamic> toJson() => {'id': id, 'name': name};
+
+  static User fromJson(Map<String, dynamic> json) =>
+      User(id: json['id'] as int, name: json['name'] as String);
+}
+
+final api = Api();
+
+class Api {
+  Future<User> getUser(String id) async => User(id: 123, name: 'User');
+}
+
+Future<void> main() async {
   // Initialize Hive (required once per app)
   Hive.init('path/to/hive');
 
@@ -72,6 +89,7 @@ void main() async {
     key: 'user:123',
     fetch: (req) => api.getUser('123'),
   );
+  print(user);
 }
 ```
 
@@ -83,9 +101,29 @@ import 'package:hive_ce_flutter/hive_ce_flutter.dart';
 import 'package:syncache/syncache.dart';
 import 'package:syncache_hive/syncache_hive.dart';
 
-void main() async {
+class User {
+  final int id;
+  final String name;
+  const User({required this.id, required this.name});
+
+  Map<String, dynamic> toJson() => {'id': id, 'name': name};
+
+  static User fromJson(Map<String, dynamic> json) =>
+      User(id: json['id'] as int, name: json['name'] as String);
+}
+
+class MyApp extends StatelessWidget {
+  const MyApp({required this.cache});
+
+  final Syncache<User> cache;
+
+  @override
+  Widget build(BuildContext context) => const SizedBox.shrink();
+}
+
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   // Initialize Hive for Flutter
   await Hive.initFlutter();
 
@@ -127,7 +165,7 @@ await store.close();
 
 ### HiveStore
 
-```dart
+```text
 class HiveStore<T> implements TaggableStore<T> {
   /// Opens a HiveStore with the specified box name.
   static Future<HiveStore<T>> open<T>({
@@ -165,6 +203,8 @@ class HiveStore<T> implements TaggableStore<T> {
 HiveStore requires `fromJson` and `toJson` functions to serialize your data type. This is because Hive stores data as maps internally.
 
 ```dart
+import 'package:syncache_hive/syncache_hive.dart';
+
 class User {
   final String name;
   final String email;
@@ -183,6 +223,12 @@ class User {
     'email': email,
   };
 }
+
+final store = HiveStore.open<User>(
+  boxName: 'users',
+  fromJson: User.fromJson,
+  toJson: (user) => user.toJson(),
+);
 ```
 
 ## License

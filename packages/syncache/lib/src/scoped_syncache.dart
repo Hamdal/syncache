@@ -11,6 +11,7 @@ import 'policy.dart';
 import 'prefetch.dart';
 import 'retry.dart';
 import 'syncache.dart';
+import 'syncache_entry.dart';
 
 /// A scoped view of a [Syncache] instance.
 ///
@@ -159,6 +160,31 @@ class ScopedSyncache<T> {
     Duration? ttl,
   }) {
     return _cache.set(key: _scopedKey(key), value: value, ttl: ttl);
+  }
+
+  /// Creates a typed [SyncacheEntry] with automatic key prefixing.
+  ///
+  /// The returned entry is bound to the scope-prefixed key and delegates
+  /// to the underlying [Syncache], so [SyncacheEntry.key] is the resolved
+  /// (prefixed) key — e.g. `scoped.entry('user:123')` produces an entry
+  /// whose [SyncacheEntry.key] is `'$scope:user:123'`.
+  ///
+  /// Entries are lightweight views; see [SyncacheEntry] for the full
+  /// contract.
+  SyncacheEntry<T> entry(
+    String key, {
+    required Fetcher<T> fetch,
+    Policy policy = Policy.offlineFirst,
+    Duration? ttl,
+    List<String>? tags,
+  }) {
+    return _cache.entry(
+      _scopedKey(key),
+      fetch: fetch,
+      policy: policy,
+      ttl: ttl,
+      tags: tags,
+    );
   }
 
   /// See [Syncache.mutate] for full documentation.

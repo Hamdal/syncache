@@ -6,8 +6,8 @@ Flutter integration for [Syncache](https://pub.dev/packages/syncache) - lifecycl
 
 ```yaml
 dependencies:
-  syncache: ^0.4.0
-  syncache_flutter: ^0.4.0
+  syncache: ^0.5.0
+  syncache_flutter: ^0.5.0
 ```
 
 ## Quick Start
@@ -17,16 +17,31 @@ dependencies:
 Wrap your app (or a subtree) with `SyncacheScope` to provide cache instances to descendants:
 
 ```dart
+import 'package:flutter/material.dart';
 import 'package:syncache/syncache.dart';
 import 'package:syncache_flutter/syncache_flutter.dart';
 
-void main() async {
+class User {
+  final String name;
+  const User(this.name);
+}
+
+class MyApp extends StatelessWidget {
+  const MyApp({required this.cache});
+
+  final Syncache<User> cache;
+
+  @override
+  Widget build(BuildContext context) => const SizedBox.shrink();
+}
+
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   // Initialize connectivity detection
   final network = FlutterNetwork();
   await network.initialize();
-  
+
   // Create your cache
   final userCache = Syncache<User>(
     store: MemoryStore<User>(),
@@ -37,7 +52,7 @@ void main() async {
     SyncacheScope<User>(
       cache: userCache,
       network: network,
-      child: MyApp(),
+      child: MyApp(cache: userCache),
     ),
   );
 }
@@ -48,9 +63,24 @@ void main() async {
 Use `CacheBuilder` to reactively display cached data:
 
 ```dart
+import 'package:flutter/material.dart';
+import 'package:syncache/syncache.dart';
+import 'package:syncache_flutter/syncache_flutter.dart';
+
+class User {
+  final String name;
+  const User(this.name);
+}
+
+final api = Api();
+
+class Api {
+  Future<User> getUser(String id) async => User('User');
+}
+
 class UserProfile extends StatelessWidget {
   final String userId;
-  
+
   const UserProfile({required this.userId});
 
   @override
@@ -98,8 +128,8 @@ MultiSyncacheScope(
     SyncacheScopeConfig<Post>(postCache),
     SyncacheScopeConfig<Settings>(settingsCache),
   ],
-  child: MyApp(),
-)
+  child: const MyApp(),
+);
 ```
 
 ### CacheBuilder
@@ -111,13 +141,14 @@ CacheBuilder<User>(
   cacheKey: 'user:123',
   fetch: fetchUser,
   policy: Policy.staleWhileRefresh,
-  ttl: Duration(minutes: 5),
+  ttl: const Duration(minutes: 5),
   initialData: cachedUser,
-  buildWhen: (previous, current) => previous.id != current.id,
+  buildWhen: (previous, current) => previous?.name != current.name,
   builder: (context, snapshot) {
-    // Build UI based on snapshot state
+    if (!snapshot.hasData) return const SizedBox.shrink();
+    return Text(snapshot.data!.name);
   },
-)
+);
 ```
 
 ### CacheConsumer
@@ -128,16 +159,17 @@ Consumer pattern with separate listener for side effects:
 CacheConsumer<User>(
   cacheKey: 'user:123',
   fetch: fetchUser,
-  listener: (context, data) {
+  listener: (context, snapshot) {
     // Handle side effects (e.g., show snackbar, navigate)
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('User updated: ${data.name}')),
+      SnackBar(content: Text('User updated: ${snapshot.data!.name}')),
     );
   },
   builder: (context, snapshot) {
-    // Build UI
+    if (!snapshot.hasData) return const SizedBox.shrink();
+    return Text(snapshot.data!.name);
   },
-)
+);
 ```
 
 ### FlutterNetwork
@@ -169,14 +201,14 @@ SyncacheScope<User>(
   network: network,
   config: LifecycleConfig(
     refetchOnResume: true,
-    refetchOnResumeMinDuration: Duration(minutes: 1),
+    refetchOnResumeMinDuration: const Duration(minutes: 1),
     refetchOnReconnect: true,
     onRefetchError: (key, error, stackTrace) {
       logger.warning('Failed to refetch $key: $error');
     },
   ),
-  child: MyApp(),
-)
+  child: const MyApp(),
+);
 ```
 
 ### SyncacheValueListenable
@@ -192,9 +224,10 @@ final listenable = cache.toValueListenable(
 ValueListenableBuilder<AsyncSnapshot<User>>(
   valueListenable: listenable,
   builder: (context, snapshot, child) {
-    // Build UI
+    if (!snapshot.hasData) return const SizedBox.shrink();
+    return Text(snapshot.data!.name);
   },
-)
+);
 
 // Trigger manual refresh
 await listenable.refresh();
@@ -228,7 +261,7 @@ listenable.dispose();
 
 - Dart SDK: ^3.0.0
 - Flutter: >=3.10.0
-- syncache: ^0.4.0
+- syncache: ^0.5.0
 - connectivity_plus: ^7.0.0
 
 ## License

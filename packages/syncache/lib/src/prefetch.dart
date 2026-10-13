@@ -19,7 +19,7 @@ class PrefetchRequest<T> {
   /// Defaults to [Policy.refresh] to always fetch fresh data.
   final Policy policy;
 
-  /// If null, uses the cache's [defaultRetry] setting.
+  /// If null, uses the cache's `defaultRetry` setting.
   final RetryConfig? retry;
 
   const PrefetchRequest({

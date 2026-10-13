@@ -67,6 +67,11 @@ class FetchEngine<T> {
     return _doFetchAndStoreConditional(key, fetch, ttl, retry, cancel, tags);
   }
 
+  /// Returns the keys with an in-flight (deduplicated) fetch right now.
+  ///
+  /// Used by debug tooling ([SyncacheDebug]); not part of the fetch API.
+  List<String> get inFlightKeys => _inFlight.keys.toList(growable: false);
+
   void clear() {
     _inFlight.clear();
   }

@@ -1,3 +1,11 @@
+## 0.5.0
+
+### Changed
+
+- Bumped the `syncache` dependency to `^0.5.0` (typed entries API,
+  `SyncacheDebug` debug dumps) in lockstep. No behavioral changes in this
+  package.
+
 ## 0.4.0
 
 ### Added

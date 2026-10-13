@@ -97,7 +97,7 @@ class MutationDiscarded<T> extends MutationOutcome<T> {
 class MutationHandle<T> {
   final Completer<MutationOutcome<T>> _completer;
 
-  /// Internal: creates a handle backed by [completer]. Called by the
+  /// Internal: creates a handle backed by `completer`. Called by the
   /// mutation queue when a mutation is submitted — application code should
   /// only ever *receive* handles from `Syncache.mutate`.
   const MutationHandle.fromCompleter(this._completer);

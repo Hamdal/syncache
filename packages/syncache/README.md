@@ -8,33 +8,32 @@ Syncache provides a unified API for caching data with multiple strategies, react
 
 ```yaml
 dependencies:
-  syncache: ^0.4.0
+  syncache: ^0.5.0
 ```
 
 ## Quick Start
 
+Bind each data source to a typed **entry** once, then read and watch
+without repeating keys or fetchers:
+
 ```dart
-import 'package:syncache/syncache.dart';
+final cache = Syncache<User>(store: MemoryStore<User>());
 
-// Create a cache instance
-final cache = Syncache<User>(
-  store: MemoryStore<User>(),
+final userEntry = cache.entry(
+  'user:123',
+  fetch: (request) => api.getUser(123),
+  ttl: const Duration(minutes: 5),
 );
 
-// Fetch data with offline-first policy
-final user = await cache.get(
-  key: 'user:123',
-  fetch: (request) => api.getUser(123),
-);
-
-// Watch for reactive updates
-cache.watch(
-  key: 'user:123',
-  fetch: (request) => api.getUser(123),
-).listen((user) {
-  print('User updated: ${user.name}');
-});
+final user = await userEntry.get();        // offline-first fetch + cache
+Stream<User> updates = userEntry.watch();  // reactive stream
+await userEntry.refresh();                 // force a network refresh
+await userEntry.invalidate();              // delete the cached entry
 ```
+
+Every entry method delegates to the identical `Syncache` operation — see
+[Typed Entries](#typed-entries) — so behavior is exactly what the low-level
+API would do.
 
 ## Features
 
@@ -60,6 +59,43 @@ final user = await cache.get(
 );
 ```
 
+### Typed Entries
+
+`cache.entry(...)` returns a `SyncacheEntry<T>` — a lightweight, stateless
+view of one key bound to its fetcher and default policy/ttl/tags:
+
+```dart
+final entry = cache.entry(
+  'user:123',
+  fetch: fetchUser,
+  policy: Policy.offlineFirst,
+  ttl: Duration(minutes: 5),
+);
+
+await entry.get(); // bound defaults: key + fetch + policy + ttl
+await entry.getWithMeta();
+await entry.refresh();
+await entry.set(User(id: 123, name: 'Local'));
+await entry.invalidate();
+
+Stream<User> values = entry.watch();
+Stream<CacheResult<User>> meta = entry.watchWithMeta();
+```
+
+Entries hold **no state**: no stream controllers, no subscriptions, nothing
+to dispose. Create as many as you like, store them in fields or providers,
+and treat them as plain handles onto the cache. Scoped caches produce
+prefixed entries automatically:
+
+```dart
+final tenantEntry = cache.scoped('tenant:abc').entry(
+  'user:123',
+  fetch: fetchUser,
+);
+// Bound to the physical key 'tenant:abc:user:123'
+await tenantEntry.get();
+```
+
 ### Reactive Streams
 
 Subscribe to cache updates with `watch()`:
@@ -75,6 +111,9 @@ cache.watchWithMeta(key: 'user:123', fetch: fetchUser).listen((result) {
   print('Is stale: ${result.meta.isStale}');
 });
 ```
+
+Invalidation does **not** close watch streams — the watcher is refetched
+with its own parameters and the stream stays open.
 
 ### Optimistic Mutations
 
@@ -103,8 +142,6 @@ By default the mutation queue lives in memory: killing the app while offline
 loses queued writes. Configure an **outbox** to make them durable:
 
 ```dart
-import 'package:syncache_hive/syncache_hive.dart';
-
 final outbox = await HiveMutationOutbox.open();
 final cache = Syncache<User>(
   store: store,
@@ -115,7 +152,7 @@ final cache = Syncache<User>(
 
 // Pass a payload describing the change and a snapshot of the optimistic
 // value — both are persisted with the record.
-final handle = await cache.mutate(
+await cache.mutate(
   key: 'user:123',
   mutation: Mutation<User>(
     apply: (user) => user.copyWith(name: 'New Name'),
@@ -160,10 +197,10 @@ recovery for you on mount:
 ```dart
 SyncacheScope<User>(
   cache: cache,
-  resolvePendingMutation: (record) async => /* rebuild the Mutation */,
+  resolvePendingMutation: resolvePending,
   onRecovered: (count) => debugPrint('$count writes restored'),
-  child: MyApp(),
-)
+  child: const MyApp(),
+);
 ```
 
 #### Using the outbox without `syncache_hive`
@@ -172,18 +209,19 @@ The outbox is a four-method interface in core `syncache` — implement it over
 any persistence you already own, or use the shipped in-memory reference:
 
 ```dart
-class MemoryMutationOutbox implements MutationOutbox { /* ... */ }
-
-// A drift cache with a Hive outbox is a valid mix: the outbox backend is
-// independent of the cache Store backend.
-final cache = Syncache<User>(store: driftStore, outbox: myOutbox);
+final cache = Syncache<User>(
+  store: MemoryStore<User>(),
+  outbox: MemoryMutationOutbox(), // or your own MutationOutbox implementation
+);
 ```
 
 The contract: `save`/`delete`/`clear`/`loadAll` (ordered by `seq`). Failing
 writes never block the cache — they are reported to observers via
 `SyncacheObserver.onOutboxError`. Calling `mutate(payload: ...)` without any
 outbox configured throws `StateError` rather than silently dropping the
-payload.
+payload. Backends that implement the interface over another engine (e.g.
+`syncache_hive`, `syncache_drift`) can be mixed freely: the outbox backend
+is independent of the cache `Store` backend.
 
 > **Make endpoints idempotent.** Retries and replay can double-apply
 > non-idempotent operations. Put a client-generated operation id in the
@@ -317,10 +355,10 @@ final results = await cache.prefetch([
 ]);
 
 // Dependency graph prefetch
-final results = await cache.prefetchGraph([
-  PrefetchNode(key: 'config', fetch: fetchConfig),
-  PrefetchNode(key: 'user', fetch: fetchUser, dependsOn: ['config']),
-  PrefetchNode(key: 'posts', fetch: fetchPosts, dependsOn: ['user']),
+final graph = await cache.prefetchGraph([
+  PrefetchNode(key: 'user:1', fetch: fetchUser1),
+  PrefetchNode(key: 'user:2', fetch: fetchUser2, dependsOn: ['user:1']),
+  PrefetchNode(key: 'user:3', fetch: fetchUser3, dependsOn: ['user:1']),
 ]);
 ```
 
@@ -333,14 +371,22 @@ final cache = Syncache<User>(
   store: MemoryStore<User>(),
   observers: [LoggingObserver()],
 );
+```
 
-// Or implement your own
+Or implement your own observer:
+
+```dart
+import 'package:syncache/syncache.dart';
+
+// Your analytics SDK (stubbed here).
+void trackEvent(String event, Map<String, Object?> properties) {}
+
 class AnalyticsObserver extends SyncacheObserver {
   @override
-  void onCacheHit(String key) => analytics.track('cache_hit', {'key': key});
-  
+  void onCacheHit(String key) => trackEvent('cache_hit', {'key': key});
+
   @override
-  void onCacheMiss(String key) => analytics.track('cache_miss', {'key': key});
+  void onCacheMiss(String key) => trackEvent('cache_miss', {'key': key});
 }
 ```
 
@@ -348,9 +394,10 @@ In Flutter apps, route log output through `debugPrint` and quiet the
 high-frequency events:
 
 ```dart
-import 'package:syncache_flutter/syncache_flutter.dart';
-
-observers: [LoggingObserver(log: syncacheDebugLog, verbose: false)]
+final cache = Syncache<User>(
+  store: MemoryStore<User>(),
+  observers: [LoggingObserver(log: syncacheDebugLog, verbose: false)],
+);
 ```
 
 ### Stats
@@ -363,9 +410,26 @@ print('hits: ${stats.hits}, misses: ${stats.misses}');
 print('pending mutations: ${stats.pendingMutations}');
 print('entries: ${stats.entryCount}'); // null if the store can't enumerate
 
-cache.resetStats();                            // zero everything
-cache.resetStats({SyncacheCounter.hits});      // or a single counter
+cache.resetStats();                       // zero everything
+cache.resetStats({SyncacheCounter.hits}); // or a single counter
 ```
+
+### Debugging
+
+Dump the live internal state — registered watchers, in-flight fetches,
+pending mutations, stats, and store contents — as a JSON-safe map:
+
+```dart
+final debug = SyncacheDebug(cache);
+
+print(await debug.dump());          // structured snapshot
+print(await SyncacheDebug.dumpJson(cache)); // pretty-printed JSON
+```
+
+For a visual inspector in Flutter apps — cache entries, the pending
+mutation queue with retry/discard actions, and a clear-cache button — use
+`SyncacheInspectorScreen` from `syncache_flutter` (ship it behind a debug
+flag).
 
 ### Cache Lifecycle
 
@@ -373,20 +437,22 @@ Bounded memory, expired-entry collection:
 
 ```dart
 // Bounded store: least-recently-used eviction past 500 entries.
-final cache = Syncache<User>(
+final bounded = Syncache<User>(
   store: MemoryStore<User>(maxLength: 500),
 );
 // Evictions fire SyncacheObserver.onEvict; watchers are not refetched.
+```
 
+```dart
 // Periodic expired-entry sweep (timer is cancelled on dispose).
-final cache2 = Syncache<User>(
+final periodic = Syncache<User>(
   store: MemoryStore<User>(),
   cleanupInterval: const Duration(minutes: 10),
 );
 
 // Or sweep manually / opportunistically:
-final removed = await cache2.cleanup();
-final cache3 = Syncache<User>(
+final removed = await periodic.cleanup();
+final opportunistic = Syncache<User>(
   store: MemoryStore<User>(),
   opportunisticCleanupEvery: 64, // at most once per 64 writes
 );
@@ -434,28 +500,47 @@ final cache = Syncache<User>(
 Share cache data across multiple Syncache instances:
 
 ```dart
-final cache1 = Syncache<User>(store: SharedMemoryStore<User>('users'));
-final cache2 = Syncache<User>(store: SharedMemoryStore<User>('users'));
+final cache1 = Syncache<User>(store: SharedMemoryStore<User>(namespace: 'users'));
+final cache2 = Syncache<User>(store: SharedMemoryStore<User>(namespace: 'users'));
 // Both instances share the same underlying data
 ```
 
+### Persistent backends
+
+For storage that survives restarts, use a backend package:
+
+- [`syncache_hive`](https://pub.dev/packages/syncache_hive) — Hive-backed
+  `TaggableStore` + durable outbox.
+- [`syncache_drift`](https://pub.dev/packages/syncache_drift) — SQLite
+  (Drift) `TaggableStore` + outbox on one shared connection.
+
 ### Custom Store
 
-Implement the `Store` interface for custom backends (SQLite, Hive, etc.):
+Implement the `Store` interface for custom backends (SQLite, IndexedDB, etc.):
 
 ```dart
+import 'package:syncache/syncache.dart';
+
 class SqliteStore<T> implements Store<T> {
   @override
-  Future<void> write(String key, Stored<T> entry) async { ... }
-  
+  Future<void> write(String key, Stored<T> entry) async {
+    throw UnimplementedError();
+  }
+
   @override
-  Future<Stored<T>?> read(String key) async { ... }
-  
+  Future<Stored<T>?> read(String key) async {
+    throw UnimplementedError();
+  }
+
   @override
-  Future<void> delete(String key) async { ... }
-  
+  Future<void> delete(String key) async {
+    throw UnimplementedError();
+  }
+
   @override
-  Future<void> clear() async { ... }
+  Future<void> clear() async {
+    throw UnimplementedError();
+  }
 }
 ```
 
@@ -464,6 +549,12 @@ class SqliteStore<T> implements Store<T> {
 Provide a custom `Network` implementation for offline detection:
 
 ```dart
+import 'package:syncache/syncache.dart';
+
+class Connectivity {
+  bool get hasConnection => true;
+}
+
 class ConnectivityNetwork implements Network {
   final Connectivity _connectivity;
 
@@ -473,20 +564,21 @@ class ConnectivityNetwork implements Network {
   bool get isOnline => _connectivity.hasConnection;
 }
 
-final cache = Syncache<User>(
-  store: MemoryStore<User>(),
-  network: ConnectivityNetwork(),
+final cache = Syncache<String>(
+  store: MemoryStore<String>(),
+  network: ConnectivityNetwork(Connectivity()),
 );
 ```
 
-## Related Packages
+Implement `ReactiveNetwork` to get automatic mutation flushes on reconnect.
 
-Looking for additional functionality? Check out these companion packages:
+## Related Packages
 
 | Package | Description |
 |---------|-------------|
-| [syncache_flutter](https://pub.dev/packages/syncache_flutter) | Flutter integration with widgets (`CacheBuilder`, `CacheConsumer`), lifecycle management, and connectivity detection via `FlutterNetwork` |
+| [syncache_flutter](https://pub.dev/packages/syncache_flutter) | Flutter integration with widgets (`CacheBuilder`, `CacheConsumer`), lifecycle management, connectivity detection via `FlutterNetwork`, and the `SyncacheInspectorScreen` debug page |
 | [syncache_hive](https://pub.dev/packages/syncache_hive) | Persistent storage backend using Hive for cross-platform caching (iOS, Android, Web, Desktop) |
+| [syncache_drift](https://pub.dev/packages/syncache_drift) | Persistent storage backend using SQLite (Drift) with a relational tag index and outbox on a shared connection |
 
 ## License
 

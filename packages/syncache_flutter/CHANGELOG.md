@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.5.0
+
+### Added
+
+- **`SyncacheInspectorScreen<T>`**: a ready-made debug page for a running
+  cache — stats summary, the pending-mutation queue with per-item
+  **discard** (and queue-wide **retry now**) actions, a cache-entry list
+  (version, storedAt, stale badge), the raw `SyncacheDebug` JSON dump, and
+  a clear-cache button. Ship it behind a debug flag; it is also demoed in
+  the example app.
+
+### Changed
+
+- Bumped the `syncache` dependency to `^0.5.0` (typed entries API,
+  `SyncacheDebug`) in lockstep.
+
 ## [0.4.0]
 
 ### Added
