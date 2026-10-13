@@ -21,6 +21,7 @@ import 'scoped_syncache.dart';
 import 'stats_collector.dart';
 import 'store.dart';
 import 'stored.dart';
+import 'syncache_entry.dart';
 import 'syncache_stats.dart';
 
 /// An offline-first cache and sync engine for Dart applications.
@@ -507,6 +508,53 @@ class Syncache<T> {
     await _notifyDependents(key);
   }
 
+  // ============================================================
+  // Typed Entries
+  // ============================================================
+
+  /// Creates a typed [SyncacheEntry] bound to [key], [fetch] and the given
+  /// default cache parameters.
+  ///
+  /// An entry is a lightweight, stateless view of one cache key: it
+  /// removes the repeated string-key + fetch-closure ergonomics by binding
+  /// them once. Every entry method delegates to the corresponding
+  /// [Syncache] operation with the bound defaults, so behavior (policies,
+  /// invalidation semantics, stream lifecycles) is identical to calling
+  /// the cache directly.
+  ///
+  /// ```dart
+  /// final entry = cache.entry(
+  ///   'user:123',
+  ///   fetch: (req) => api.getUser(123),
+  ///   ttl: const Duration(minutes: 5),
+  /// );
+  ///
+  /// final user = await entry.get();
+  /// await entry.refresh();
+  /// await entry.invalidate();
+  /// ```
+  ///
+  /// Entries hold no stream controllers or other resources: create as many
+  /// as you like, store them anywhere, and never dispose them. See
+  /// [SyncacheEntry] for the full contract.
+  SyncacheEntry<T> entry(
+    String key, {
+    required Fetcher<T> fetch,
+    Policy policy = Policy.offlineFirst,
+    Duration? ttl,
+    List<String>? tags,
+  }) {
+    _checkNotDisposed();
+    return SyncacheEntry.of(
+      this,
+      key: key,
+      fetch: fetch,
+      policy: policy,
+      ttl: ttl,
+      tags: tags,
+    );
+  }
+
   /// Notifies dependent watchers to refetch when a dependency changes.
   Future<void> _notifyDependents(String key) async {
     final dependentKeys = _dependents[key];
@@ -613,7 +661,7 @@ class Syncache<T> {
   ///
   /// Listeners keep receiving the last value until the refetch completes
   /// (stale-while-invalidated). The stream only completes
-  /// ([ConnectionState.done]) when every listener unsubscribes or the
+  /// (`ConnectionState.done`) when every listener unsubscribes or the
   /// cache is disposed.
   ///
   /// Example:
@@ -849,12 +897,13 @@ class Syncache<T> {
 
   /// Applies an optimistic mutation to a cached value.
   ///
-  /// The mutation's [Mutation.apply] function is called immediately to
-  /// update the local cache, providing instant feedback. The [Mutation.send]
-  /// function is then queued for background sync to persist the change.
+  /// The mutation's `apply` function is called immediately to
+  /// update the local cache, providing instant feedback. The
+  /// [Mutation.send] function is then queued for background sync to
+  /// persist the change.
   ///
-  /// If [send] succeeds, the server's response replaces the optimistic value.
-  /// If [send] fails, the mutation remains queued and will retry when online.
+  /// If `send` succeeds, the server's response replaces the optimistic value.
+  /// If `send` fails, the mutation remains queued and will retry when online.
   ///
   /// Watchers of the [key] are notified of both the optimistic update
   /// and the eventual server confirmation.
@@ -904,7 +953,7 @@ class Syncache<T> {
   /// be persisted, silently breaking the durability the caller asked for.
   ///
   /// If [optimisticSnapshot] is provided, the *optimistic value* (the value
-  /// [mutation.apply] just produced) is persisted alongside the payload as
+  /// `mutation.apply` just produced) is persisted alongside the payload as
   /// a JSON-safe snapshot. At recovery, with `decodeOptimisticSnapshot`
   /// configured on the cache, replay sends the exact pre-death value.
   /// Without a snapshot, replay falls back to re-deriving
@@ -1226,6 +1275,82 @@ class Syncache<T> {
   void resetStats([Set<SyncacheCounter>? counters]) {
     _checkNotDisposed();
     _statsCollector.reset(counters);
+  }
+
+  // ============================================================
+  // Debug & Introspection
+  // ============================================================
+
+  /// Builds a JSON-safe snapshot of the cache's live internal state for
+  /// debugging and diagnostics.
+  ///
+  /// The returned map contains:
+  /// - `watchers`: every registered watch stream (value and meta), with its
+  ///   key, the policy it will be refetched with, and its TTL.
+  /// - `inFlightFetches`: keys with a deduplicated fetch currently running.
+  /// - `pendingMutations`: the offline mutation queue — id, key, status,
+  ///   retry count, last error (stringified), and enqueue time.
+  /// - `stats`: the [SyncacheStats] counters (see [stats]).
+  /// - `store`: the approximate entry count and up to [sampleKeyLimit]
+  ///   sample keys, or `null` when the store cannot enumerate keys.
+  ///
+  /// Every value is a JSON primitive, list, or map, so the result can be
+  /// logged directly or piped through `jsonEncode` — or use [SyncacheDebug]
+  /// for a ready-made facade. This is a diagnostic aid: the shape is not a
+  /// stable API contract and may grow over time.
+  Future<Map<String, Object?>> debugSnapshot({int sampleKeyLimit = 20}) async {
+    _checkNotDisposed();
+
+    final watchers = <Map<String, Object?>>[
+      for (final registration in _watchers.values)
+        {
+          'key': registration.key,
+          'kind': 'value',
+          'policy': registration.policy.name,
+          'ttlMs': registration.ttl?.inMilliseconds,
+        },
+      for (final registration in _metaWatchers.values)
+        {
+          'key': registration.key,
+          'kind': 'meta',
+          'policy': registration.policy.name,
+          'ttlMs': registration.ttl?.inMilliseconds,
+        },
+    ];
+
+    final pendingMutations = <Map<String, Object?>>[
+      for (final info in _mutationQueue.snapshot)
+        {
+          'id': info.id,
+          'key': info.key,
+          'status': info.status.name,
+          'retryCount': info.retryCount,
+          'queuedAt': info.queuedAt.toIso8601String(),
+          'lastAttemptAt': info.lastAttemptAt?.toIso8601String(),
+          'lastError': info.lastError?.toString(),
+        },
+    ];
+
+    Map<String, Object?>? storeInfo;
+    if (store is IterableStore<T>) {
+      try {
+        final keys = await (store as IterableStore<T>).keys();
+        storeInfo = {
+          'entryCount': keys.length,
+          'sampleKeys': keys.take(sampleKeyLimit).toList(growable: false),
+        };
+      } catch (_) {
+        storeInfo = null;
+      }
+    }
+
+    return {
+      'watchers': watchers,
+      'inFlightFetches': _fetchEngine.inFlightKeys,
+      'pendingMutations': pendingMutations,
+      'stats': (await stats).toDebugJson(),
+      'store': storeInfo,
+    };
   }
 
   // ============================================================
@@ -2237,7 +2362,7 @@ class _StandardFetchStrategy<T> extends _FetchStrategy<T, T> {
   }
 }
 
-/// Fetch strategy that returns CacheResult<T> with metadata.
+/// Fetch strategy that returns `CacheResult<T>` with metadata.
 class _MetaFetchStrategy<T> extends _FetchStrategy<T, CacheResult<T>> {
   final Fetcher<T> fetch;
   final Store<T> store;

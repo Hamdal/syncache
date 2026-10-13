@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:syncache/syncache.dart';
 
-/// A [LogFunction] for [LoggingObserver] that routes output through
+/// A `LogFunction` for [LoggingObserver] that routes output through
 /// Flutter's `debugPrint`.
 ///
 /// Use it in Flutter apps instead of the observer's default `print` so log

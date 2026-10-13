@@ -130,6 +130,26 @@ class SyncacheStats {
       'evictions: $evictions, '
       'pendingMutations: $pendingMutations, '
       'entryCount: $entryCount)';
+
+  /// Renders this snapshot as a JSON-encodable map for debug dumps.
+  ///
+  /// Field names match the constructor parameters. Used by
+  /// `Syncache.debugSnapshot`; kept public so custom tooling renders
+  /// stats identically.
+  Map<String, Object?> toDebugJson() => {
+        'hits': hits,
+        'misses': misses,
+        'fetchesStarted': fetchesStarted,
+        'fetchesSucceeded': fetchesSucceeded,
+        'fetchesFailed': fetchesFailed,
+        'fetchesRetried': fetchesRetried,
+        'fetchesCancelled': fetchesCancelled,
+        'stores': stores,
+        'invalidations': invalidations,
+        'evictions': evictions,
+        'pendingMutations': pendingMutations,
+        'entryCount': entryCount,
+      };
 }
 
 /// An individual stats counter that can be reset on its own via

@@ -61,14 +61,16 @@ class _MyAppState extends State<MyApp> {
           colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
           useMaterial3: true,
         ),
-        home: const HomePage(),
+        home: HomePage(userCache: _userCache),
       ),
     );
   }
 }
 
 class HomePage extends StatelessWidget {
-  const HomePage({super.key});
+  final Syncache<User> userCache;
+
+  const HomePage({super.key, required this.userCache});
 
   @override
   Widget build(BuildContext context) {
@@ -114,6 +116,19 @@ class HomePage extends StatelessWidget {
             onTap: () => Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const LifecycleDemo()),
+            ),
+          ),
+          _buildSection(
+            context,
+            title: 'Debug Inspector',
+            description: 'Live cache state: entries, stats, pending mutations',
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => SyncacheInspectorScreen<User>(
+                  cache: userCache,
+                ),
+              ),
             ),
           ),
         ],

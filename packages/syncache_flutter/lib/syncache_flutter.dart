@@ -1,7 +1,7 @@
 /// Flutter integration for Syncache - lifecycle management, widgets,
 /// and connectivity detection.
 ///
-/// This package provides Flutter-specific functionality for [Syncache],
+/// This package provides Flutter-specific functionality for `Syncache`,
 /// including:
 ///
 /// - [FlutterNetwork]: Real connectivity detection using `connectivity_plus`
@@ -74,6 +74,7 @@ export 'src/cache_consumer.dart' show CacheConsumer;
 export 'src/extensions.dart'
     show SyncacheFlutterExtensions, SyncacheValueListenable;
 export 'src/flutter_network.dart' show FlutterNetwork;
+export 'src/inspector_screen.dart' show SyncacheInspectorScreen;
 export 'src/logging.dart' show syncacheDebugLog;
 export 'src/lifecycle_observer.dart'
     show LifecycleConfig, SyncacheLifecycleObserver, WatcherRegistration;

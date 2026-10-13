@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.5.0
+
+### Added
+
+- **Typed entries API.** `cache.entry(key, fetch: ..., policy: ..., ttl: ...,
+  tags: ...)` returns a `SyncacheEntry<T>` — a lightweight, stateless view of
+  one cache key bound to its fetcher and default parameters. Entries expose
+  `get` / `getWithMeta` (with per-call policy override), `watch` /
+  `watchWithMeta`, `refresh` (get with `Policy.refresh`), `set`, and
+  `invalidate`, each delegating to the identical `Syncache` operation.
+  Entries hold no stream controllers or other resources: they are cheap to
+  create, shareable, and never need disposing. `ScopedSyncache.entry(...)`
+  creates entries with automatic scope prefixing (`entry.key` is the
+  resolved, prefixed key).
+
 ## 0.4.0
 
 ### Added

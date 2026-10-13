@@ -1,7 +1,7 @@
 /// Hive storage backend for Syncache.
 ///
 /// This library provides [HiveStore], a persistent storage implementation
-/// using Hive that can be used with [Syncache].
+/// using Hive that can be used with `Syncache`.
 ///
 /// ## Getting Started
 ///

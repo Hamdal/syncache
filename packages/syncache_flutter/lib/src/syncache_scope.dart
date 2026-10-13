@@ -65,7 +65,7 @@ class SyncacheScope<T> extends StatefulWidget {
 
   /// Optional network instance for connectivity detection.
   ///
-  /// If provided and [config.refetchOnReconnect] is true, watchers
+  /// If provided and `config.refetchOnReconnect` is true, watchers
   /// will be refreshed when connectivity is restored.
   final FlutterNetwork? network;
 

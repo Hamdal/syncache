@@ -37,7 +37,7 @@ class SyncacheException implements Exception {
 /// but not available:
 /// - Using [Policy.cacheOnly] when the key doesn't exist
 /// - Using [Policy.offlineFirst] when offline with no cached data
-/// - Attempting to [mutate] a key that hasn't been cached
+/// - Attempting to `mutate()` a key that hasn't been cached
 ///
 /// Example:
 /// ```dart
