@@ -10,6 +10,20 @@ import 'stored.dart';
 /// This implementation also supports tag-based operations through
 /// [TaggableStore], enabling grouped cache invalidation.
 ///
+/// ## Bounded capacity (LRU)
+///
+/// Set [maxLength] (or pass it to the constructor) to make the store evict
+/// entries when it grows past the limit: the **least-recently-used** entry
+/// is evicted on every write that exceeds [maxLength]. Reads and writes
+/// both refresh an entry's recency, so entries in active use are kept while
+/// cold ones make room. Tag mappings of evicted entries are removed
+/// together with them, and each eviction is reported through [onEvict] —
+/// which [Syncache] wires to its observers as `SyncacheObserver.onEvict`.
+///
+/// ```dart
+/// final store = MemoryStore<User>(maxLength: 500);
+/// ```
+///
 /// For shared storage across multiple [Syncache] instances, consider using
 /// [SharedMemoryStore] instead.
 ///
@@ -24,25 +38,71 @@ import 'stored.dart';
 /// - [SharedMemoryStore] for namespace-based shared storage
 /// - [Store] for the abstract storage interface
 /// - [TaggableStore] for tag-based operations
-class MemoryStore<T> implements TaggableStore<T> {
+class MemoryStore<T>
+    implements TaggableStore<T>, BoundedStore<T>, IterableStore<T> {
+  /// Access-ordered storage: Dart's default [Map] is a [LinkedHashMap], so
+  /// re-inserting a key on access moves it to the most-recently-used end
+  /// and the first key is always the least-recently-used candidate.
   final Map<String, Stored<T>> _cache = {};
   final Map<String, Set<String>> _tags = {};
 
+  int? _maxLength;
+
+  @override
+  void Function(String key)? onEvict;
+
+  /// Creates an in-memory store.
+  ///
+  /// Pass [maxLength] to bound the store with least-recently-used eviction;
+  /// the default `null` keeps it unbounded. [onEvict] is invoked after each
+  /// eviction (it is assigned automatically when the store is used with a
+  /// [Syncache]).
+  MemoryStore({int? maxLength, this.onEvict}) {
+    _maxLength = maxLength;
+  }
+
+  @override
+  int? get maxLength => _maxLength;
+
+  @override
+  set maxLength(int? value) {
+    _maxLength = value;
+    if (value != null) _evictOverflow();
+  }
+
+  @override
+  Future<int> get length async => _cache.length;
+
+  @override
+  Future<List<String>> keys() async => _cache.keys.toList();
+
   @override
   Future<void> write(String key, Stored<T> entry) async {
+    // Re-insert so an overwrite refreshes the entry's LRU recency.
+    _cache.remove(key);
     _cache[key] = entry;
+    _evictOverflow();
   }
 
   @override
   Future<void> writeWithTags(
       String key, Stored<T> entry, List<String> tags) async {
+    _cache.remove(key);
     _cache[key] = entry;
     _tags[key] = tags.toSet();
+    _evictOverflow();
   }
 
   @override
   Future<Stored<T>?> read(String key) async {
-    return _cache[key];
+    final entry = _cache[key];
+    if (entry != null) {
+      // Touch: re-insert to move the entry to the most-recently-used end.
+      // Allocation-light — the same entry object is reused.
+      _cache.remove(key);
+      _cache[key] = entry;
+    }
+    return entry;
   }
 
   @override
@@ -124,6 +184,22 @@ class MemoryStore<T> implements TaggableStore<T> {
   Future<List<String>> getKeysByPattern(String pattern) async {
     final regex = _patternToRegex(pattern);
     return _cache.keys.where(regex.hasMatch).toList();
+  }
+
+  /// Evicts least-recently-used entries until the store fits [maxLength].
+  ///
+  /// Tag mappings are removed together with each evicted entry so tag
+  /// operations never surface ghost keys, and [onEvict] is invoked per
+  /// evicted key.
+  void _evictOverflow() {
+    final limit = _maxLength;
+    if (limit == null) return;
+    while (_cache.length > limit) {
+      final lruKey = _cache.keys.first;
+      _cache.remove(lruKey);
+      _tags.remove(lruKey);
+      onEvict?.call(lruKey);
+    }
   }
 
   /// Converts a glob pattern to a RegExp.

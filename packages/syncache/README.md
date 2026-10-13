@@ -8,7 +8,7 @@ Syncache provides a unified API for caching data with multiple strategies, react
 
 ```yaml
 dependencies:
-  syncache: ^0.2.0
+  syncache: ^0.4.0
 ```
 
 ## Quick Start
@@ -344,6 +344,54 @@ class AnalyticsObserver extends SyncacheObserver {
 }
 ```
 
+In Flutter apps, route log output through `debugPrint` and quiet the
+high-frequency events:
+
+```dart
+import 'package:syncache_flutter/syncache_flutter.dart';
+
+observers: [LoggingObserver(log: syncacheDebugLog, verbose: false)]
+```
+
+### Stats
+
+Every cache keeps constant-memory health counters — snapshot them any time:
+
+```dart
+final stats = await cache.stats;
+print('hits: ${stats.hits}, misses: ${stats.misses}');
+print('pending mutations: ${stats.pendingMutations}');
+print('entries: ${stats.entryCount}'); // null if the store can't enumerate
+
+cache.resetStats();                            // zero everything
+cache.resetStats({SyncacheCounter.hits});      // or a single counter
+```
+
+### Cache Lifecycle
+
+Bounded memory, expired-entry collection:
+
+```dart
+// Bounded store: least-recently-used eviction past 500 entries.
+final cache = Syncache<User>(
+  store: MemoryStore<User>(maxLength: 500),
+);
+// Evictions fire SyncacheObserver.onEvict; watchers are not refetched.
+
+// Periodic expired-entry sweep (timer is cancelled on dispose).
+final cache2 = Syncache<User>(
+  store: MemoryStore<User>(),
+  cleanupInterval: const Duration(minutes: 10),
+);
+
+// Or sweep manually / opportunistically:
+final removed = await cache2.cleanup();
+final cache3 = Syncache<User>(
+  store: MemoryStore<User>(),
+  opportunisticCleanupEvery: 64, // at most once per 64 writes
+);
+```
+
 ### Known limitations
 
 - **Replay without optimistic snapshots re-derives values.** Outbox records
@@ -369,6 +417,15 @@ In-memory storage with optional tag support:
 ```dart
 final cache = Syncache<User>(
   store: MemoryStore<User>(),
+);
+```
+
+Pass `maxLength` to bound memory — the least-recently-used entry is evicted
+when the limit is exceeded (see [Cache Lifecycle](#cache-lifecycle)):
+
+```dart
+final cache = Syncache<User>(
+  store: MemoryStore<User>(maxLength: 500),
 );
 ```
 

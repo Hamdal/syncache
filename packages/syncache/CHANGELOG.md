@@ -5,6 +5,48 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.4.0
+
+### Added
+
+- **Bounded caches with LRU eviction.** `MemoryStore` now implements the new
+  optional `BoundedStore` capability: pass `maxLength` (constructor or the
+  settable property) to evict the **least-recently-used** entry whenever a
+  write exceeds the limit — reads and writes both refresh recency, evicted
+  entries leave the tag maps, and every eviction fires `onEvict`. Default
+  stays unbounded. `Syncache` wires a bounded store's evictions into its
+  observers, so apps see `SyncacheObserver.onEvict(key)` (watchers are not
+  refetched — eviction is a capacity event, not an invalidation).
+- **`IterableStore` capability** (`keys()`): implemented by `MemoryStore`,
+  `SharedMemoryStore`, and `HiveStore`. `Store` itself is unchanged — both
+  new capabilities are opt-in interfaces so third-party backends keep
+  compiling.
+- **`Syncache.cleanup()`**: removes every expired entry in one pass and
+  returns the count; swept keys notify observers (`onInvalidate`) and their
+  watchers refetch exactly like `invalidate()` does (streams stay open).
+  Returns 0 for
+  stores without key enumeration.
+- **Automatic cleanup options** (both default `null` = manual only):
+  `cleanupInterval` runs a periodic sweep (timer cancelled in `dispose`),
+  and `opportunisticCleanupEvery` sweeps at most once per N writes —
+  constant amortized cost, disable with `null`.
+- **`SyncacheStats` snapshots** via the async `Syncache.stats` getter:
+  hits, misses, fetches started/succeeded/failed/retried/cancelled, stores,
+  invalidations, evictions, live pending-mutation count, and approximate
+  `entryCount` (null when the store can't enumerate). Counters only — no
+  per-key maps. `resetStats()` zeroes everything; pass a
+  `Set<SyncacheCounter>` to reset individual counters. Powered by an
+  internal observer that never appears in the `observers` list.
+- **`SyncacheObserver.onEvict(key)`** for bounded-store evictions.
+- **`LoggingObserver.verbose`** (default `true`): set `false` to suppress
+  the high-frequency `CACHE HIT` / `FETCH START` / `STORE` lines.
+
+### Changed
+
+- `LoggingObserver` documentation now points Flutter apps at
+  `syncacheDebugLog` (from `syncache_flutter`) to route output through
+  `debugPrint`; pure Dart keeps `print`.
+
 ## 0.3.0
 
 ### Added

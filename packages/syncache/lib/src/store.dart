@@ -132,3 +132,61 @@ abstract class TaggableStore<T> implements Store<T> {
   /// Returns all keys that match the given glob [pattern].
   Future<List<String>> getKeysByPattern(String pattern);
 }
+
+/// Extended store interface for caches with a bounded capacity.
+///
+/// Implement this interface to let a store evict entries when it grows past
+/// [maxLength]. [Syncache] detects the capability at construction time and
+/// forwards evictions to observers as `SyncacheObserver.onEvict` — the
+/// [Store] interface itself never grows, so third-party backends that don't
+/// bound themselves keep compiling unchanged.
+///
+/// The eviction **policy** (e.g. least-recently-used) is an implementation
+/// detail of the store; the interface only carries the capacity and the
+/// eviction hook.
+///
+/// See also:
+/// - [MemoryStore] for an LRU implementation
+abstract class BoundedStore<T> implements Store<T> {
+  /// Callback invoked with a key right after that key has been evicted for
+  /// exceeding [maxLength].
+  ///
+  /// [Syncache] assigns this automatically when a [BoundedStore] is passed
+  /// to it, so evictions surface as `SyncacheObserver.onEvict` events and
+  /// increment `SyncacheStats.evictions`. Leave it unset when the store is
+  /// used standalone.
+  void Function(String key)? onEvict;
+
+  /// Maximum number of entries the store retains.
+  ///
+  /// `null` (the default) means the store is unbounded and never evicts.
+  set maxLength(int? value);
+
+  /// Maximum number of entries the store retains.
+  ///
+  /// `null` means the store is unbounded and never evicts.
+  int? get maxLength;
+
+  /// Current number of entries in the store.
+  Future<int> get length;
+}
+
+/// Extended store interface for stores that can enumerate their keys.
+///
+/// Implement this interface to enable whole-cache maintenance operations on
+/// your store — currently [Syncache.cleanup] (expired-entry collection) and
+/// `SyncacheStats.entryCount`. The [Store] interface itself never grows, so
+/// third-party backends that can't enumerate keys keep compiling unchanged.
+///
+/// See also:
+/// - [MemoryStore] for an in-memory implementation
+/// - [HiveStore](package:syncache_hive/syncache_hive.dart) for a persistent
+///   implementation
+abstract class IterableStore<T> implements Store<T> {
+  /// Returns all keys currently present in the store.
+  ///
+  /// Implementations should avoid deserializing entry values — callers
+  /// typically iterate every key (e.g. to find expired entries), and the
+  /// point of this capability is cheap enumeration.
+  Future<List<String>> keys();
+}

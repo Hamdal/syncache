@@ -67,10 +67,54 @@ import 'package:syncache/syncache.dart';
 /// await Hive.initFlutter();
 /// ```
 ///
+/// ## Tag index performance
+///
+/// Tag operations (`getKeysByTag`, `deleteByTag(s)`) are backed by an
+/// in-memory secondary index (`tag → keys`) that is rebuilt lazily on the
+/// first tag operation after open — a single box scan that reads only each
+/// entry's `tags` field, never deserializing values — and then kept in sync
+/// on every write/delete/clear. Tag lookups are therefore O(matches)
+/// instead of a full box scan that deserializes every value.
+///
+/// Pattern operations (`deleteByPattern`, `getKeysByPattern`) remain key
+/// scans but never deserialize entry values.
+///
+/// Example:
+///
+/// ```dart
+/// import 'package:hive_ce/hive_ce.dart';
+/// import 'package:syncache/syncache.dart';
+/// import 'package:syncache_hive/syncache_hive.dart';
+///
+/// // Initialize Hive (required once per app)
+/// Hive.init('path/to/hive');  // or Hive.initFlutter() for Flutter
+///
+/// // Open a HiveStore
+/// final store = await HiveStore.open<User>(
+///   boxName: 'users',
+///   fromJson: User.fromJson,
+///   toJson: (user) => user.toJson(),
+/// );
+///
+/// // Use with Syncache
+/// final cache = Syncache<User>(store: store);
+///
+/// // Remember to close when done
+/// await store.close();
+/// ```
+///
+/// ## Flutter Usage
+///
+/// For Flutter apps, use `hive_ce_flutter` package and initialize with:
+/// ```dart
+/// await Hive.initFlutter();
+/// ```
+///
 /// See also:
 /// - [TaggableStore] for the tagging interface
+/// - [IterableStore] for key enumeration (expired-entry cleanup)
 /// - [Store] for the base storage interface
-class HiveStore<T> implements TaggableStore<T> {
+class HiveStore<T> implements TaggableStore<T>, IterableStore<T> {
   /// The Hive box storing cache entries (including embedded tags).
   final Box<Map<dynamic, dynamic>> _box;
 
@@ -79,6 +123,12 @@ class HiveStore<T> implements TaggableStore<T> {
 
   /// Converts a value of type [T] to a JSON map.
   final Map<String, dynamic> Function(T value) toJson;
+
+  /// Secondary tag index (`tag → keys`), built lazily on the first tag
+  /// operation after open and kept in sync on every mutating operation.
+  /// Null until first needed so opening a store and using it without tags
+  /// never pays for a scan.
+  Map<String, Set<String>>? _tagIndex;
 
   /// Tracks whether this store has been closed.
   bool _isClosed = false;
@@ -212,6 +262,8 @@ class HiveStore<T> implements TaggableStore<T> {
       final existingTags = _extractTags(_box.get(key) ?? const {});
       final data = _serializeEntry(entry, tags: existingTags);
       await _box.put(key, data);
+      _indexRemove(key, existingTags);
+      _indexAdd(key, existingTags);
     });
   }
 
@@ -222,8 +274,11 @@ class HiveStore<T> implements TaggableStore<T> {
     List<String> tags,
   ) {
     return _withOperation(() async {
+      final previousTags = _currentTags(key);
       final data = _serializeEntry(entry, tags: tags);
       await _box.put(key, data);
+      _indexRemove(key, previousTags);
+      _indexAdd(key, tags);
     });
   }
 
@@ -256,7 +311,9 @@ class HiveStore<T> implements TaggableStore<T> {
   @override
   Future<void> delete(String key) {
     return _withOperation(() async {
+      final previousTags = _currentTags(key);
       await _box.delete(key);
+      _indexRemove(key, previousTags);
     });
   }
 
@@ -264,14 +321,22 @@ class HiveStore<T> implements TaggableStore<T> {
   Future<void> clear() {
     return _withOperation(() async {
       await _box.clear();
+      _tagIndex?.clear();
     });
+  }
+
+  @override
+  Future<List<String>> keys() {
+    return _withOperation(
+      () async => _box.keys.cast<String>().toList(),
+    );
   }
 
   @override
   Future<void> deleteByTag(String tag) {
     return _withOperation(() async {
-      final keysToDelete = await _getKeysByTagInternal(tag);
-      await _deleteKeys(keysToDelete);
+      final keysToDelete = _keysForTag(tag);
+      await _deleteKeysFromBoxAndIndex(keysToDelete);
     });
   }
 
@@ -281,49 +346,55 @@ class HiveStore<T> implements TaggableStore<T> {
       if (tags.isEmpty) return;
 
       final tagSet = tags.toSet();
-      final keysToDelete = <String>[];
+      final index = _ensureTagIndex();
+      Set<String>? keysToDelete;
 
-      // Copy keys to list to avoid concurrent modification issues
-      final keys = _box.keys.toList();
-      for (final key in keys) {
-        final data = _box.get(key);
-        if (data == null) continue;
-
-        final entryTags = _extractTags(data).toSet();
-        final shouldDelete = matchAll
-            ? tagSet.every(entryTags.contains)
-            : tagSet.any(entryTags.contains);
-
-        if (shouldDelete) {
-          keysToDelete.add(key as String);
+      if (matchAll) {
+        // Intersection: keys present for every tag.
+        for (final tag in tagSet) {
+          final keysForTag = index[tag];
+          if (keysForTag == null) {
+            keysToDelete = {};
+            break;
+          }
+          keysToDelete = keysToDelete == null
+              ? keysForTag.toSet()
+              : keysToDelete.intersection(keysForTag).toSet();
+        }
+        keysToDelete ??= {};
+      } else {
+        // Union: keys present for any tag.
+        keysToDelete = {};
+        for (final tag in tagSet) {
+          keysToDelete.addAll(index[tag] ?? const <String>{});
         }
       }
 
-      await _deleteKeys(keysToDelete);
+      await _deleteKeysFromBoxAndIndex(keysToDelete.toList());
     });
   }
 
   @override
   Future<List<String>> getKeysByTag(String tag) {
-    return _withOperation(() => _getKeysByTagInternal(tag));
+    return _withOperation(() async => _keysForTag(tag));
   }
 
-  /// Internal implementation of getKeysByTag without operation tracking.
-  /// Used by deleteByTag to avoid nested operation tracking.
-  Future<List<String>> _getKeysByTagInternal(String tag) async {
-    final keys = <String>[];
-    // Copy keys to list to avoid concurrent modification issues
-    final boxKeys = _box.keys.toList();
-    for (final key in boxKeys) {
-      final data = _box.get(key);
-      if (data == null) continue;
+  /// Returns the keys associated with [tag] from the in-memory index.
+  List<String> _keysForTag(String tag) {
+    return _ensureTagIndex()[tag]?.toList() ?? const <String>[];
+  }
 
-      final entryTags = _extractTags(data);
-      if (entryTags.contains(tag)) {
-        keys.add(key as String);
-      }
+  /// Deletes [keys] from the box and removes them from every tag set of
+  /// the in-memory index. Tags must be read before the box deletion.
+  Future<void> _deleteKeysFromBoxAndIndex(List<String> keys) async {
+    if (keys.isEmpty) return;
+    final keysByOldTags = <String, List<String>>{
+      for (final key in keys) key: _currentTags(key),
+    };
+    await _deleteKeys(keys);
+    for (final entry in keysByOldTags.entries) {
+      _indexRemove(entry.key, entry.value);
     }
-    return keys;
   }
 
   @override
@@ -356,6 +427,64 @@ class HiveStore<T> implements TaggableStore<T> {
   // ============================================================
   // Private Helpers
   // ============================================================
+
+  /// Returns the in-memory tag index, rebuilding it from a single box scan
+  /// on first use after open.
+  ///
+  /// The scan reads only each entry's raw `tags` field — values are never
+  /// deserialized. Entries that cannot be read are skipped (consistent
+  /// with [read]'s corruption handling).
+  Map<String, Set<String>> _ensureTagIndex() {
+    final existing = _tagIndex;
+    if (existing != null) return existing;
+
+    final index = <String, Set<String>>{};
+    for (final key in _box.keys) {
+      try {
+        final data = _box.get(key);
+        if (data == null) continue;
+        final tags = _extractTags(data);
+        for (final tag in tags) {
+          index.putIfAbsent(tag, () => <String>{}).add(key as String);
+        }
+      } catch (_) {
+        // Corrupted entry: skip it rather than failing the whole rebuild.
+      }
+    }
+    _tagIndex = index;
+    return index;
+  }
+
+  /// Removes [key] from the index's tag sets. No-op when the index hasn't
+  /// been built yet — a later rebuild reflects the box state anyway.
+  void _indexRemove(String key, Iterable<String> tags) {
+    final index = _tagIndex;
+    if (index == null) return;
+    for (final tag in tags) {
+      final keys = index[tag];
+      if (keys == null) continue;
+      keys.remove(key);
+      if (keys.isEmpty) index.remove(tag);
+    }
+  }
+
+  /// Adds [key] to the index's tag sets. No-op when the index hasn't been
+  /// built yet — a later rebuild reflects the box state anyway.
+  void _indexAdd(String key, Iterable<String> tags) {
+    final index = _tagIndex;
+    if (index == null) return;
+    for (final tag in tags) {
+      index.putIfAbsent(tag, () => <String>{}).add(key);
+    }
+  }
+
+  /// Tags of the raw stored entry for [key], without deserializing the
+  /// value. Returns an empty list when the key doesn't exist.
+  List<String> _currentTags(String key) {
+    final data = _box.get(key);
+    if (data == null) return const <String>[];
+    return _extractTags(data);
+  }
 
   /// Deletes multiple keys efficiently using batch delete.
   Future<void> _deleteKeys(List<String> keys) async {

@@ -17,7 +17,7 @@ import 'stored.dart';
 /// await store1.write('key', storedValue);
 /// final value = await store2.read('key'); // Same value
 /// ```
-class SharedMemoryStore<T> implements TaggableStore<T> {
+class SharedMemoryStore<T> implements TaggableStore<T>, IterableStore<T> {
   static final Map<String, Map<String, Object>> _registry = {};
   static final Map<String, Map<String, Set<String>>> _tagRegistry = {};
   static final Map<String, Type> _typeRegistry = {};
@@ -63,6 +63,9 @@ class SharedMemoryStore<T> implements TaggableStore<T> {
 
   @override
   Future<Stored<T>?> read(String key) async => _cache[key];
+
+  @override
+  Future<List<String>> keys() async => _cache.keys.toList();
 
   @override
   Future<List<String>> getTags(String key) async {

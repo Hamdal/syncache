@@ -18,8 +18,10 @@ import 'policy.dart';
 import 'prefetch.dart';
 import 'retry.dart';
 import 'scoped_syncache.dart';
+import 'stats_collector.dart';
 import 'store.dart';
 import 'stored.dart';
+import 'syncache_stats.dart';
 
 /// An offline-first cache and sync engine for Dart applications.
 ///
@@ -115,8 +117,41 @@ class Syncache<T> {
   /// back.
   final T Function(Object? snapshot)? decodeOptimisticSnapshot;
 
+  /// How often a periodic expired-entry sweep runs, or `null` (the default)
+  /// for manual-only cleanup via [cleanup].
+  ///
+  /// Expired entries otherwise linger until their key is next read or an
+  /// explicit [cleanup] call — with this set, they are collected
+  /// periodically even when never read again. The timer is cancelled in
+  /// [dispose].
+  final Duration? cleanupInterval;
+
+  /// Opportunistic cleanup frequency: run a sweep at most once every N
+  /// writes, or `null` (the default) to disable opportunistic sweeping.
+  ///
+  /// This is a cheap heuristic for apps that write steadily but never want
+  /// to think about expiry: every Nth write triggers a [cleanup] pass,
+  /// making the amortized cost constant. Writes are counted across fetches,
+  /// [set], and [mutate].
+  final int? opportunisticCleanupEvery;
+
   late final FetchEngine<T> _fetchEngine;
   late final MutationQueue<T> _mutationQueue;
+
+  /// Internal stats accumulator. Dispatched through [_notifyObservers] like
+  /// a regular observer but never exposed in the [observers] list.
+  final StatsCollector _statsCollector = StatsCollector();
+
+  /// Periodic cleanup timer, created when [cleanupInterval] is set and
+  /// cancelled in [dispose].
+  Timer? _cleanupTimer;
+
+  /// Writes observed since the last opportunistic sweep.
+  int _writesSinceSweep = 0;
+
+  /// Re-entrancy guard so overlapping sweeps (timer + opportunistic +
+  /// manual) coalesce into the first one running.
+  bool _isSweeping = false;
 
   final Map<String, StreamController<T>> _controllers = {};
   final Map<String, StreamController<CacheResult<T>>> _metaControllers = {};
@@ -161,6 +196,14 @@ class Syncache<T> {
   /// [recoverPendingMutations]. Without an outbox the mutation queue is
   /// memory-only and unsynced writes are lost when the process dies.
   ///
+  /// Set [cleanupInterval] to sweep expired entries periodically, and/or
+  /// [opportunisticCleanupEvery] to sweep at most once per N writes. Both
+  /// default to `null` — expired entries are then only removed when their
+  /// key is next read or [cleanup] is called manually.
+  ///
+  /// Pass a store implementing [BoundedStore] (e.g. `MemoryStore(maxLength:)`)
+  /// to bound memory: evictions surface as `SyncacheObserver.onEvict`.
+  ///
   /// Example:
   /// ```dart
   /// final cache = Syncache<User>(
@@ -169,6 +212,7 @@ class Syncache<T> {
   ///   observers: [LoggingObserver()],   // Optional
   ///   defaultRetry: RetryConfig(maxAttempts: 3), // Optional
   ///   mutationRetry: MutationRetryConfig(maxAttempts: 5), // Optional
+  ///   cleanupInterval: Duration(minutes: 10), // Optional
   /// );
   /// ```
   Syncache({
@@ -179,6 +223,8 @@ class Syncache<T> {
     MutationRetryConfig? mutationRetry,
     MutationOutbox? outbox,
     this.decodeOptimisticSnapshot,
+    this.cleanupInterval,
+    this.opportunisticCleanupEvery,
   })  : network = network ?? const AlwaysOnline(),
         observers = observers ?? const [],
         defaultRetry = defaultRetry ?? RetryConfig.none,
@@ -200,6 +246,21 @@ class Syncache<T> {
       decodeOptimisticSnapshot: decodeOptimisticSnapshot,
     );
 
+    // Wire eviction events from bounded stores into the observer path so
+    // user observers and the stats collector both see them.
+    if (store is BoundedStore<T>) {
+      (store as BoundedStore<T>).onEvict = (key) {
+        _notifyObservers((o) => o.onEvict(key));
+      };
+    }
+
+    // Periodic expired-entry collection.
+    if (cleanupInterval != null) {
+      _cleanupTimer = Timer.periodic(cleanupInterval!, (_) {
+        unawaited(_sweep());
+      });
+    }
+
     // Automatic mutation flush on reconnect: only possible when the
     // network reports connectivity changes.
     if (this.network is ReactiveNetwork) {
@@ -213,9 +274,13 @@ class Syncache<T> {
     }
   }
 
-  /// Notifies all observers, catching errors to prevent observer failures
-  /// from breaking cache operations.
+  /// Notifies all observers — user-provided ones plus the internal stats
+  /// collector — catching errors to prevent observer failures from breaking
+  /// cache operations.
   void _notifyObservers(void Function(SyncacheObserver observer) callback) {
+    try {
+      callback(_statsCollector);
+    } catch (_) {}
     for (final observer in observers) {
       try {
         callback(observer);
@@ -435,6 +500,7 @@ class Syncache<T> {
 
     await store.write(key, Stored(value: value, meta: newMeta));
     _notifyObservers((o) => o.onStore(key));
+    _recordWrite();
     await _notify(key, isFromCache: false);
 
     // Trigger refetch for dependent watchers
@@ -892,6 +958,7 @@ class Syncache<T> {
 
     await store.write(key, Stored(value: optimisticValue, meta: newMeta));
     _notifyObservers((o) => o.onStore(key));
+    _recordWrite();
     unawaited(_notify(key, isFromCache: false));
 
     unawaited(_notifyDependents(key));
@@ -1036,6 +1103,129 @@ class Syncache<T> {
   Future<void> processPendingMutations() async {
     _checkNotDisposed();
     await _mutationQueue.processQueue();
+  }
+
+  // ============================================================
+  // Cache Lifecycle (cleanup & statistics)
+  // ============================================================
+
+  /// Removes every expired entry from the store and returns the count.
+  ///
+  /// Entries whose TTL has passed normally linger until their key is next
+  /// read; [cleanup] collects them all in one pass. It requires the store
+  /// to implement `IterableStore` (both [MemoryStore] and `HiveStore` do);
+  /// with a store that can't enumerate keys this returns 0.
+  ///
+  /// Active watchers of swept keys are refetched exactly like
+  /// [invalidate] does: their streams stay open and receive the fresh
+  /// value (or the refetch error) when it arrives.
+  ///
+  /// Sweeping can also happen automatically — via the [cleanupInterval]
+  /// periodic timer or the [opportunisticCleanupEvery] heuristic — and
+  /// overlapping sweeps are coalesced.
+  ///
+  /// ```dart
+  /// final removed = await cache.cleanup();
+  /// print('collected $removed expired entries');
+  /// ```
+  Future<int> cleanup() async {
+    _checkNotDisposed();
+    return _sweep();
+  }
+
+  /// Shared sweep implementation: deletes expired entries, notifies
+  /// observers, refetches watchers of swept keys, and returns the count.
+  /// Coalesces concurrent sweeps behind [_isSweeping].
+  Future<int> _sweep() async {
+    if (_isDisposed || _isSweeping) return 0;
+    if (store is! IterableStore<T>) return 0;
+
+    _isSweeping = true;
+    try {
+      final iterableStore = store as IterableStore<T>;
+      final keys = await iterableStore.keys();
+      final swept = <String>[];
+      for (final key in keys) {
+        try {
+          final entry = await store.read(key);
+          if (entry != null && entry.meta.isExpired) {
+            await store.delete(key);
+            swept.add(key);
+          }
+        } catch (_) {
+          // Unreadable/corrupted entry: skip it. Store-level corruption
+          // handling (e.g. HiveStore.read) may already have removed it.
+        }
+      }
+
+      for (final key in swept) {
+        _notifyObservers((o) => o.onInvalidate(key));
+      }
+      await _refetchWatchers(swept);
+      return swept.length;
+    } finally {
+      _isSweeping = false;
+    }
+  }
+
+  /// Counts a write and, when [opportunisticCleanupEvery] is configured,
+  /// triggers an opportunistic expired-entry sweep at most once per N
+  /// writes.
+  void _recordWrite() {
+    final every = opportunisticCleanupEvery;
+    if (every == null || every <= 0) return;
+    _writesSinceSweep++;
+    if (_writesSinceSweep >= every && !_isSweeping) {
+      _writesSinceSweep = 0;
+      unawaited(_sweep());
+    }
+  }
+
+  /// Returns an immutable snapshot of the cache's health counters.
+  ///
+  /// Counters cover cache hits/misses, fetches started/succeeded/failed/
+  /// retried/cancelled, stores, invalidations, evictions, and the live
+  /// pending-mutation count. `entryCount` is the approximate store size, or
+  /// `null` when the store cannot enumerate keys.
+  ///
+  /// The getter is async because resolving [SyncacheStats.entryCount] may
+  /// require asking the store. Counters only — no per-key bookkeeping — so
+  /// snapshotting is O(entryCount) at worst (for the key enumeration) and
+  /// stats memory is constant.
+  ///
+  /// ```dart
+  /// final stats = await cache.stats;
+  /// final totalReads = stats.hits + stats.misses;
+  /// if (totalReads > 0) {
+  ///   print('hit rate: ${(stats.hits / totalReads)}');
+  /// }
+  /// ```
+  Future<SyncacheStats> get stats async {
+    _checkNotDisposed();
+    int? entryCount;
+    if (store is IterableStore<T>) {
+      try {
+        entryCount = (await (store as IterableStore<T>).keys()).length;
+      } catch (_) {
+        entryCount = null;
+      }
+    }
+    return _statsCollector.snapshot(
+      pendingMutations: _mutationQueue.count,
+      entryCount: entryCount,
+    );
+  }
+
+  /// Resets stats counters.
+  ///
+  /// Pass a subset of [SyncacheCounter] to reset individual counters —
+  /// e.g. `resetStats({SyncacheCounter.hits, SyncacheCounter.misses})` to
+  /// start a fresh hit-rate measurement window — or call with no arguments
+  /// to reset everything. [SyncacheStats.pendingMutations] is live state,
+  /// not an accumulator, so it is never reset.
+  void resetStats([Set<SyncacheCounter>? counters]) {
+    _checkNotDisposed();
+    _statsCollector.reset(counters);
   }
 
   // ============================================================
@@ -1564,6 +1754,9 @@ class Syncache<T> {
     if (_isDisposed) return;
     _isDisposed = true;
 
+    _cleanupTimer?.cancel();
+    _cleanupTimer = null;
+
     unawaited(_connectivitySubscription?.cancel());
     _connectivitySubscription = null;
 
@@ -1607,6 +1800,7 @@ class Syncache<T> {
     } else {
       await store.write(key, entry);
     }
+    _recordWrite();
   }
 
   /// Performs invalidations specified by a mutation after successful sync.
