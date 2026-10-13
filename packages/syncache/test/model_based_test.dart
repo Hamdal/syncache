@@ -177,7 +177,8 @@ void main() {
       } else if (op < 78) {
         // offlineFirst read: cached value, or fetch when missing+online.
         final key = keys[rng.nextInt(keys.length)];
-        trace.add("offlineFirst $key online=${net.online} model=${modelValues[key]}");
+        trace.add(
+            "offlineFirst $key online=${net.online} model=${modelValues[key]}");
         final actual = await readOfflineFirst(key);
         if (!modelValues.containsKey(key) && net.online) {
           modelValues[key] = networkCounter;
