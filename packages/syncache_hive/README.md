@@ -10,6 +10,10 @@ Hive storage backend for [Syncache](https://pub.dev/packages/syncache) - cross-p
 - Pattern-based key matching and deletion
 - Automatic serialization via JSON
 - **Atomic operations** - each entry (data + tags) is stored as a single unit
+- **Index-backed tag operations** - tag lookups use an in-memory secondary
+  index (rebuilt lazily with a single key-only scan after open), so
+  `getKeysByTag`/`deleteByTag` are O(matches), never a full box scan that
+  deserializes every value
 
 ## Installation
 
@@ -17,8 +21,8 @@ Add `syncache_hive` to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  syncache: ^0.2.0
-  syncache_hive: ^0.2.0
+  syncache: ^0.4.0
+  syncache_hive: ^0.4.0
   hive_ce: ^2.20.2
 ```
 
@@ -28,6 +32,17 @@ For Flutter apps, also add `hive_ce_flutter`:
 dependencies:
   hive_ce_flutter: ^2.4.0
 ```
+
+### Backend dependency stance
+
+`syncache_hive` depends on [`hive_ce`](https://pub.dev/packages/hive_ce) —
+the community edition of Hive — **not** the discontinued `hive` package.
+The constraint is an honest caret (`^2.20.2`): any `hive_ce` release within
+major version 2 works. `hive_ce` ships independent major bumps, so this
+package only follows a major bump deliberately (with migration testing of
+on-disk format compatibility), not automatically. Treat `hive_ce` major
+upgrades as their own small change to this package, and pin your own app to
+a caret range you have tested.
 
 ## Usage
 

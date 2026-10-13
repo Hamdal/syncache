@@ -407,6 +407,52 @@ void main() {
       expect(observer.includeStackTrace, isTrue);
     });
   });
+
+  group('LoggingObserver verbose flag', () {
+    test('verbose (default) logs every event', () {
+      final messages = <String>[];
+      final observer = LoggingObserver(log: messages.add);
+
+      observer.onCacheHit('k');
+      observer.onFetchStart('k');
+      observer.onStore('k');
+      observer.onCacheMiss('k');
+      observer.onEvict('k');
+
+      expect(messages, hasLength(5));
+    });
+
+    test('verbose=false suppresses high-frequency events', () {
+      final messages = <String>[];
+      final observer = LoggingObserver(log: messages.add, verbose: false);
+
+      observer.onCacheHit('k');
+      observer.onFetchStart('k');
+      observer.onStore('k');
+
+      expect(messages, isEmpty,
+          reason: 'CACHE HIT, FETCH START and STORE are chatty');
+
+      // High-signal events still log.
+      observer.onCacheMiss('k');
+      observer.onFetchSuccess('k', const Duration(milliseconds: 10));
+      observer.onFetchError('k', Exception('x'), StackTrace.current);
+      observer.onInvalidate('k');
+      observer.onClear();
+      observer.onEvict('k');
+      observer.onFetchCancelled('k');
+      observer.onMutationStart('k');
+      observer.onMutationSuccess('k');
+      observer.onMutationError('k', Exception('x'), StackTrace.current);
+      observer.onRetry('k', 0, Exception('x'), Duration.zero);
+      observer.onRetryExhausted('k', 2, Exception('x'));
+      observer.onMutationRetry('k', 0, Exception('x'), Duration.zero);
+      observer.onMutationRetryExhausted('k', 2, Exception('x'));
+
+      expect(messages, hasLength(14));
+      expect(messages.first, contains('CACHE MISS'));
+    });
+  });
 }
 
 /// Observer that throws on every callback to test error isolation.

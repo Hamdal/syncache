@@ -74,6 +74,7 @@ export 'src/cache_consumer.dart' show CacheConsumer;
 export 'src/extensions.dart'
     show SyncacheFlutterExtensions, SyncacheValueListenable;
 export 'src/flutter_network.dart' show FlutterNetwork;
+export 'src/logging.dart' show syncacheDebugLog;
 export 'src/lifecycle_observer.dart'
     show LifecycleConfig, SyncacheLifecycleObserver, WatcherRegistration;
 export 'src/multi_syncache_scope.dart'

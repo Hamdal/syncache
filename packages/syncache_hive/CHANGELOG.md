@@ -1,3 +1,27 @@
+## 0.4.0
+
+### Added
+
+- **Index-backed tag operations.** `HiveStore` now maintains an in-memory
+  secondary tag index (`tag → keys`) that is rebuilt lazily on the first
+  tag operation after open — a single box scan that reads only each entry's
+  `tags` field, never deserializing values — and then kept in sync on
+  every `write`/`writeWithTags`/`delete`/`clear`/`deleteByTag(s)`.
+  `getKeysByTag` and `deleteByTag(s)` are O(matches) instead of a full
+  scan that deserializes every value. Corrupted entries are skipped during
+  the rebuild (consistent with `read`'s corruption handling). On-disk
+  format is unchanged — boxes written by earlier versions open as-is.
+- **`IterableStore` support** (`keys()`): `HiveStore` can enumerate its
+  keys cheaply, enabling `Syncache.cleanup()` (expired-entry collection)
+  and `SyncacheStats.entryCount` over persistent caches. Pattern
+  operations already scanned keys only; tests now lock that in.
+
+### Changed
+
+- Dependency alignment with `syncache` 0.4.0 (constraint raised to
+  `^0.4.0`). `hive_ce` stays on an honest caret (`^2.20.2`); the README now
+  documents the upgrade stance for `hive_ce`'s independent major bumps.
+
 ## 0.3.0
 
 ### Added

@@ -36,7 +36,8 @@ export 'src/prefetch.dart'
 export 'src/query_key.dart' show QueryKey, QueryKeyStringExtension;
 export 'src/retry.dart' show RetryConfig, MutationRetryConfig;
 export 'src/scoped_syncache.dart' show ScopedSyncache;
-export 'src/store.dart' show Store, TaggableStore;
+export 'src/syncache_stats.dart' show SyncacheStats, SyncacheCounter;
+export 'src/store.dart' show Store, TaggableStore, BoundedStore, IterableStore;
 export 'src/stored.dart' show Stored;
 export 'src/syncache.dart' show Syncache;
 export 'src/exceptions.dart' show SyncacheException, CacheMissException;

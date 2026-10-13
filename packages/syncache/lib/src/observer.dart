@@ -105,6 +105,15 @@ abstract class SyncacheObserver {
   /// This happens after successful fetches and mutations.
   void onStore(String key) {}
 
+  /// Called when an entry is evicted from a bounded store because the
+  /// store exceeded its capacity (e.g. least-recently-used eviction in a
+  /// `MemoryStore` configured with `maxLength`).
+  ///
+  /// Unlike [onInvalidate], an eviction is a capacity event: watchers of
+  /// the evicted key keep their last value and are **not** refetched, so a
+  /// small cache does not trigger a refill storm.
+  void onEvict(String key) {}
+
   /// Called when a fetch fails and a retry is about to be attempted.
   ///
   /// The [attempt] is 0-indexed (0 for first retry after initial failure).

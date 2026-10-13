@@ -1,9 +1,10 @@
 import 'package:syncache/syncache.dart';
 import 'package:test/test.dart';
 
-/// Tests for the Milestone 2 invalidation semantics: invalidation must NOT
-/// close watch streams. Instead, active watchers are refetched with their
-/// own fetch/policy/ttl and the stream stays open in every outcome.
+/// Tests for the invalidation semantics introduced in 0.2.0: invalidation
+/// must NOT close watch streams. Instead, active watchers are refetched
+/// with their own fetch/policy/ttl and the stream stays open in every
+/// outcome.
 void main() {
   group('Invalidation refetch semantics', () {
     late MemoryStore<String> store;

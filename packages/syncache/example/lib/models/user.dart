@@ -38,16 +38,16 @@ class User {
   int get hashCode => Object.hash(id, name, email, avatarUrl);
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'name': name,
-        'email': email,
-        'avatarUrl': avatarUrl,
-      };
+    'id': id,
+    'name': name,
+    'email': email,
+    'avatarUrl': avatarUrl,
+  };
 
   static User fromJson(Map<String, dynamic> json) => User(
-        id: json['id'] as int,
-        name: json['name'] as String,
-        email: json['email'] as String,
-        avatarUrl: json['avatarUrl'] as String,
-      );
+    id: json['id'] as int,
+    name: json['name'] as String,
+    email: json['email'] as String,
+    avatarUrl: json['avatarUrl'] as String,
+  );
 }

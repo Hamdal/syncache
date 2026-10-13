@@ -33,6 +33,28 @@ typedef LogFunction = void Function(String message);
 /// );
 /// ```
 ///
+/// ## Flutter apps
+///
+/// The default log function uses [print], which is right for pure Dart.
+/// In Flutter, route the output through `debugPrint` so logs are batched
+/// and never dropped by the platform logger on high-traffic caches:
+///
+/// ```dart
+/// import 'package:syncache_flutter/syncache_flutter.dart';
+///
+/// final cache = Syncache<User>(
+///   store: MemoryStore(),
+///   observers: [
+///     LoggingObserver(log: syncacheDebugLog, verbose: false),
+///   ],
+/// );
+/// ```
+///
+/// With [verbose] set to `false`, only high-signal events are logged
+/// (misses, fetch outcomes, invalidations, mutations, retries, errors);
+/// the per-operation chatter (`CACHE HIT`, `STORE`, `FETCH START`) is
+/// suppressed.
+///
 /// ## Output Format
 ///
 /// ```
@@ -48,9 +70,20 @@ class LoggingObserver extends SyncacheObserver {
   /// Optional prefix for all log messages.
   final String prefix;
 
+  /// Whether to log high-frequency per-operation events.
+  ///
+  /// When `true` (the default), every observed event is logged. When
+  /// `false`, the chatty events (`CACHE HIT`, `STORE`, `FETCH START`) are
+  /// suppressed so the log stays readable on hot caches; everything else
+  /// (misses, fetch success/error/cancel, invalidations, clears,
+  /// mutations, retries) is still logged.
+  final bool verbose;
+
   /// The logging function to use for output.
   ///
-  /// Defaults to [print] if not provided.
+  /// Defaults to [print] if not provided. Flutter apps should prefer
+  /// `syncacheDebugLog` (from `package:syncache_flutter`), which wraps
+  /// Flutter's `debugPrint`.
   final LogFunction log;
 
   /// Creates a logging observer.
@@ -58,15 +91,23 @@ class LoggingObserver extends SyncacheObserver {
   /// Set [includeStackTrace] to `true` to log full stack traces on errors.
   /// The [prefix] defaults to `'Syncache'` but can be customized.
   /// Provide [log] to use a custom logging function instead of [print].
+  /// Set [verbose] to `false` to suppress high-frequency events.
   LoggingObserver({
     this.includeStackTrace = false,
     this.prefix = 'Syncache',
+    this.verbose = true,
     LogFunction? log,
   }) : log = log ?? print;
 
   void _log(String level, String message) {
     final timestamp = _formatTime(DateTime.now());
     log('[$prefix] $timestamp $level: $message');
+  }
+
+  /// Logs only when [verbose] is enabled; used for high-frequency events.
+  void _logVerbose(String level, String message) {
+    if (!verbose) return;
+    _log(level, message);
   }
 
   String _formatTime(DateTime time) {
@@ -79,7 +120,7 @@ class LoggingObserver extends SyncacheObserver {
 
   @override
   void onCacheHit(String key) {
-    _log('CACHE HIT', key);
+    _logVerbose('CACHE HIT', key);
   }
 
   @override
@@ -89,7 +130,7 @@ class LoggingObserver extends SyncacheObserver {
 
   @override
   void onFetchStart(String key) {
-    _log('FETCH START', key);
+    _logVerbose('FETCH START', key);
   }
 
   @override
@@ -135,7 +176,12 @@ class LoggingObserver extends SyncacheObserver {
 
   @override
   void onStore(String key) {
-    _log('STORE', key);
+    _logVerbose('STORE', key);
+  }
+
+  @override
+  void onEvict(String key) {
+    _log('EVICT', key);
   }
 
   @override
