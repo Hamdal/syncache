@@ -33,6 +33,8 @@ export 'src/mutation_handle.dart'
         MutationDiscarded;
 export 'src/network.dart' show Network, ReactiveNetwork, AlwaysOnline;
 export 'src/observer.dart' show SyncacheObserver;
+export 'src/paginated_cache.dart'
+    show PaginatedCache, PageResult, PagedViewState;
 export 'src/logging_observer.dart' show LoggingObserver;
 export 'src/pending_mutation_info.dart'
     show PendingMutationInfo, PendingMutationStatus;

@@ -356,6 +356,73 @@ the optimistic value stays cached until the entry is refreshed.
 > process restart, replayed mutations resolve conflicts through the
 > cache-wide default.
 
+### Pagination (infinite lists)
+
+`PaginatedCache<T>` fetches pages one at a time and accumulates them into a
+**windowed list stored as a normal cached value** — so persistence,
+optimistic `ListOperation` edits, outbox durability, and pattern/tag
+invalidation all work on paginated data with nothing new to learn:
+
+```dart
+final listCache = Syncache<List<Post>>(store: MemoryStore<List<Post>>());
+final posts = PaginatedCache<Post>(
+  cache: listCache,
+  key: 'posts?feed=home', // a normal key — patterns like 'posts?*' reach it
+  fetchPage: (pageKey) async {
+    final page = await api.getPosts();
+    return PageResult(page, nextPageKey: null); // null ⇒ no more pages
+  },
+  maxItems: 500, // trim from the front when exceeded
+);
+
+await posts.loadMore(); // fetch the next page and append
+await posts.refresh(); // re-fetch page 1 and merge (pull-to-refresh)
+
+posts.watch.listen((state) {
+  showSyncBanner(state.hasMore && !state.isLoadingMore);
+});
+
+// Optimistic add into the window, durable via the outbox:
+await listCache.mutateList(
+  key: 'posts?feed=home',
+  operation: ListOperation.append(posts.state.items.first),
+  send: () async {},
+  invalidates: ['post:*'], // invalidate item keys — never the window itself
+);
+
+// In syncache_flutter, PaginatedCacheBuilder<T> renders the state and hands
+// you a loadMore callback — scroll wiring stays app-owned:
+PaginatedCacheBuilder<Post>(
+  paginated: posts,
+  builder: (context, state, loadMore) => ListView.builder(
+    itemCount: state.items.length + (state.hasMore ? 1 : 0),
+    itemBuilder: (context, index) {
+      if (index >= state.items.length) {
+        loadMore(); // from your scroll wiring
+        return const Text('Loading…');
+      }
+      return Text(state.items[index].title);
+    },
+  ),
+);
+```
+
+The semantics that usually bite:
+
+- **`refresh` merges; invalidation drops.** `refresh()` keeps the scroll
+  position: the fresh page 1 wins at the front, duplicates (by `==`) are
+  removed from the retained tail. When the window key is invalidated
+  externally (`invalidatePattern('posts?*')`, a mutation's `invalidates:`,
+  a tag), the tail is **dropped** and page 1 is re-fetched
+  (`autoRefreshOnInvalidation: false` to reset state without refetching).
+  Eviction and `clear` reset paging state but never trigger a refill.
+- **Failed page fetches never throw.** The window and cursor stay put, the
+  error lands on `state.error`, and retrying `loadMore()` re-fetches the
+  same page. Concurrent `loadMore` calls coalesce into one fetch.
+- **Restart-safe.** The window persists in the store; the cursor is
+  in-memory. After a restart, `loadMore()` on a non-empty window
+  refresh-merges instead of appending — no duplicates.
+
 ### Tag-Based Invalidation
 
 Group related cache entries with tags for bulk invalidation:

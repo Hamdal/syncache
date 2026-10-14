@@ -80,4 +80,6 @@ export 'src/lifecycle_observer.dart'
     show LifecycleConfig, SyncacheLifecycleObserver, WatcherRegistration;
 export 'src/multi_syncache_scope.dart'
     show MultiSyncacheScope, SyncacheScopeConfig;
+export 'src/paginated_cache_builder.dart'
+    show PaginatedCacheBuilder, PaginatedViewBuilder;
 export 'src/syncache_scope.dart' show SyncacheScope;
