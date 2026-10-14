@@ -150,6 +150,12 @@ class Syncache<T> {
   late final FetchEngine<T> _fetchEngine;
   late final MutationQueue<T> _mutationQueue;
 
+  /// Observers attached after construction via [addObserver], dispatched
+  /// through the same path as the constructor-provided [observers]. Kept
+  /// separate so the public [observers] list stays exactly what the caller
+  /// passed in.
+  final List<SyncacheObserver> _dynamicObservers = <SyncacheObserver>[];
+
   /// Internal stats accumulator. Dispatched through [_notifyObservers] like
   /// a regular observer but never exposed in the [observers] list.
   final StatsCollector _statsCollector = StatsCollector();
@@ -307,6 +313,34 @@ class Syncache<T> {
         callback(observer);
       } catch (_) {}
     }
+    // Dynamic observers ([addObserver]). Index-bounded so an observer that
+    // removes itself or a peer from within a callback cannot corrupt the
+    // loop; observers added mid-notification receive the *next* event.
+    final dynamicCount = _dynamicObservers.length;
+    for (var i = 0; i < dynamicCount; i++) {
+      if (i >= _dynamicObservers.length) break;
+      try {
+        callback(_dynamicObservers[i]);
+      } catch (_) {}
+    }
+  }
+
+  /// Registers [observer] for all cache events, in addition to any observers
+  /// passed to the constructor. Unlike the constructor list, observers can
+  /// be attached and detached at any time — used by helpers that observe a
+  /// cache they were given (e.g. `PaginatedCache`).
+  ///
+  /// Avoid adding or removing observers from within an observer callback;
+  /// additions take effect from the next event onwards, and removals of the
+  /// calling observer itself are safe.
+  void addObserver(SyncacheObserver observer) {
+    _dynamicObservers.add(observer);
+  }
+
+  /// Unregisters an observer previously attached via [addObserver].
+  /// Silently does nothing if it is not registered.
+  void removeObserver(SyncacheObserver observer) {
+    _dynamicObservers.remove(observer);
   }
 
   void _checkNotDisposed() {

@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- **`PaginatedCacheBuilder<T>`**: a thin widget over core's
+  `PaginatedCache<T>` — subscribes to the windowed state, rebuilds on
+  changes, and hands the builder the current `PagedViewState<T>` plus a
+  `loadMore` callback. Deliberately scroll-agnostic: apps own their
+  ScrollController / NotificationListener.
+
 ## 0.5.0
 
 ### Added

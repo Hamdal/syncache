@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Pagination / infinite lists.** `PaginatedCache<T>` (core) fetches pages
+  one at a time and accumulates them into a windowed list stored as a
+  normal cached value — so persistence, `mutateList`/`ListOperation`
+  optimistic edits, outbox durability, and pattern/tag invalidation all
+  work on paginated data. Includes: `loadMore` (coalesced, failure-safe,
+  cursor-preserving), `refresh` (re-fetch page 1 and merge, deduping the
+  tail by `==`), `invalidate` (re-fetch page 1, drop the tail), `maxItems`
+  front-trimming, automatic refetch on external invalidation
+  (`autoRefreshOnInvalidation`, default on; eviction/clear never refetch),
+  and a post-restart rule that refresh-merges instead of duplicating the
+  rehydrated window. Flutter: `PaginatedCacheBuilder<T>` — a thin builder
+  exposing state plus a `loadMore` callback; scroll wiring stays app-owned.
+- **Dynamic observer registration.** `Syncache.addObserver(observer)` /
+  `removeObserver(observer)` attach and detach observers after
+  construction (the constructor list stays immutable). Additive.
 - **Conflict resolution.** Throw `SyncacheConflictException<T>(serverValue)`
   from a mutation's `send` when the server rejects a stale write (typically
   HTTP 409 with the server's current state in the body). Syncache never
