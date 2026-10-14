@@ -20,13 +20,13 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  syncache: ^0.5.0
+  syncache: ^0.6.0
   workmanager: ^0.10.0
 
 # Local development: resolve the sibling package from this repository
 # instead of pub.dev. Committed (rather than using a pubspec_overrides.yaml)
-# so CI resolves the package without melos while `syncache` 0.6.0 is not yet
-# published. `pub publish` ignores dependency overrides.
+# so CI resolves the package without melos. `pub publish` ignores
+# dependency overrides.
 dependency_overrides:
   syncache:
     path: ../syncache

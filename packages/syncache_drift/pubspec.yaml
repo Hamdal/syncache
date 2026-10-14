@@ -3,7 +3,7 @@ description: >-
   Drift (SQLite) storage backend for Syncache. Provides durable persistent
   caching with full support for tag-based invalidation, pattern matching, and
   a mutation outbox sharing one SQL connection with the cache.
-version: 0.5.0
+version: 0.6.0
 repository: https://github.com/Hamdal/syncache
 homepage: https://github.com/Hamdal/syncache
 issue_tracker: https://github.com/Hamdal/syncache/issues
@@ -18,7 +18,7 @@ environment:
   sdk: ^3.0.0
 
 dependencies:
-  syncache: ^0.5.0
+  syncache: ^0.6.0
   drift: ^2.20.0
 
 # Local development: resolve the sibling package from this repository

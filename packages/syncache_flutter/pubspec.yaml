@@ -1,6 +1,6 @@
 name: syncache_flutter
 description: Flutter integration for Syncache - lifecycle management, widgets, and connectivity detection.
-version: 0.5.0
+version: 0.6.0
 repository: https://github.com/Hamdal/syncache
 homepage: https://github.com/Hamdal/syncache
 issue_tracker: https://github.com/Hamdal/syncache/issues
@@ -17,7 +17,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  syncache: ^0.5.0
+  syncache: ^0.6.0
   connectivity_plus: ^7.0.0
 
 # Local development: resolve the sibling package from this repository
