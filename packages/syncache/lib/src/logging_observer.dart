@@ -212,4 +212,14 @@ class LoggingObserver extends SyncacheObserver {
     _log('MUTATION RETRY EXHAUSTED',
         '$key - failed after $totalAttempts attempts');
   }
+
+  @override
+  void onMutationConflict(String key, Object error) {
+    _log('MUTATION CONFLICT', '$key - $error');
+  }
+
+  @override
+  void onMutationResolved(String key) {
+    _log('MUTATION RESOLVED', key);
+  }
 }
