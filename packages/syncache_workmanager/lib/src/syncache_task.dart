@@ -51,6 +51,10 @@ bool isSyncacheTask(String taskName) =>
 /// isolates cannot reuse main-isolate caches. See
 /// [SyncacheBackgroundFlusher] for the registration pattern.
 ///
+/// [onReport] receives the finished pass's [SyncacheFlushReport] — the
+/// right hook for background logging, since nothing else observes a
+/// background isolate.
+///
 /// [onError] receives any flusher error (default: `debugPrint`).
 ///
 /// Throws [ArgumentError] if [taskName] is not a Syncache task — a
@@ -60,6 +64,7 @@ Future<bool> runSyncacheTask(
   String taskName, {
   required SyncacheBackgroundFlusher flusher,
   Duration timeBudget = SyncacheBackgroundFlusher.defaultFlushTimeBudget,
+  void Function(SyncacheFlushReport report)? onReport,
   void Function(Object error, StackTrace stackTrace)? onError,
 }) async {
   if (!isSyncacheTask(taskName)) {
@@ -71,10 +76,11 @@ Future<bool> runSyncacheTask(
     );
   }
   try {
-    await flusher.flush(
+    final report = await flusher.flush(
       cleanup: taskName == syncacheCleanupTaskName,
       timeBudget: timeBudget,
     );
+    onReport?.call(report);
     return true;
   } catch (error, stackTrace) {
     if (onError != null) {

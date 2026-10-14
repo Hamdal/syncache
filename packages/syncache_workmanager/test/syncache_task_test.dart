@@ -135,6 +135,44 @@ void main() {
       expect(errors.single, isA<StateError>());
     });
 
+    test('reports the finished pass through onReport', () async {
+      final store = MemoryStore<int>();
+      await store.write(
+        'n:1',
+        Stored(value: 1, meta: Metadata(version: 1, storedAt: DateTime.now())),
+      );
+      final outbox = MemoryMutationOutbox();
+      await outbox.save(
+        PendingMutationRecord(
+          id: 'mut_1',
+          key: 'n:1',
+          seq: 1,
+          payload: const {'op': 'add'},
+          queuedAt: DateTime.now(),
+        ),
+      );
+
+      final reports = <SyncacheFlushReport>[];
+      final handled = await runSyncacheTask(
+        syncacheFlushTaskName,
+        flusher: SyncacheBackgroundFlusher(
+          registrations: [
+            SyncacheBackgroundCacheRegistration<int>(
+              createCache: () async =>
+                  Syncache<int>(store: store, outbox: outbox),
+              resolveRecord: (record) async =>
+                  Mutation<int>(apply: (v) => v, send: (v) async => v),
+            ),
+          ],
+        ),
+        onReport: reports.add,
+      );
+
+      expect(handled, isTrue);
+      expect(reports.single.recovered, 1);
+      expect(reports.single.remaining, 0);
+    });
+
     test('rejects foreign task names loudly', () async {
       await expectLater(
         runSyncacheTask(

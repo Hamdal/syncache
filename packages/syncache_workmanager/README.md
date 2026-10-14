@@ -84,9 +84,12 @@ Future<Syncache<User>> buildUserCache() async {
   return Syncache<User>(
     store: store,
     outbox: outbox,
-    // Recovery replays the exact pre-death optimistic value.
+    // Recovery replays the exact pre-death optimistic value. Hive
+    // round-trips JSON maps as Map<dynamic, dynamic>, so adapt before
+    // casting — a direct `as Map<String, dynamic>` throws and every
+    // replay fails silently (unless an observer is listening).
     decodeOptimisticSnapshot: (snapshot) =>
-        User.fromJson(snapshot! as Map<String, dynamic>),
+        User.fromJson(Map<String, dynamic>.from(snapshot! as Map)),
   );
 }
 
@@ -168,6 +171,32 @@ debugPrint('background flush: $report');
 ```
 
 `runSyncacheTask` maps this to workmanager's task contract: it returns `true` when the pass completed — even with `remaining > 0`, because an unreachable server is not a task failure and the next scheduled run retries those mutations — and `false` only when the flusher throws (e.g. persistence failed to open), which asks workmanager to retry the task with backoff.
+
+### Decoding snapshots from a durable outbox
+
+Records round-trip through JSON in Hive/drift, and Hive hands nested maps
+back as `Map<dynamic, dynamic>`. A decode callback written as
+`User.fromJson(snapshot! as Map<String, dynamic>)` therefore throws on
+**every** replay — and without observers the failures are silent (records
+stay in the outbox, `recovered: 0` forever). Adapt first:
+
+```dart
+final cache = Syncache<User>(
+  store: MemoryStore<User>(),
+  decodeOptimisticSnapshot: (snapshot) =>
+      User.fromJson(Map<String, dynamic>.from(snapshot! as Map)),
+);
+```
+
+For the same reason, attach an observer (or pass `onError` to
+`HiveMutationOutbox.open`) on background caches — a background isolate has
+no other window into replay failures:
+
+```dart
+cache.addObserver(
+  LoggingObserver(prefix: '[background]', log: debugPrint, verbose: false),
+);
+```
 
 ### Multiple cache types
 
@@ -251,6 +280,22 @@ Force a pass while developing — the engine is plain Dart, so it runs anywhere,
 ```dart
 final report = await buildFlusher().flush();
 debugPrint('flushed: $report');
+```
+
+Log what the background task actually did by giving the dispatcher an `onReport` — nothing else observes a background isolate:
+
+```dart
+@pragma('vm:entry-point')
+void callbackDispatcher() {
+  Workmanager().executeTask((task, inputData) async {
+    if (!isSyncacheTask(task)) return true;
+    return runSyncacheTask(
+      task,
+      flusher: buildFlusher(),
+      onReport: (report) => debugPrint('syncache $task → $report'),
+    );
+  });
+}
 ```
 
 Schedule an immediate one-off flush from the foreground (workmanager debug mode runs it right away):

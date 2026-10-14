@@ -7,6 +7,7 @@
 // them — even if the app was killed in the meantime.
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:hive_ce_flutter/hive_ce_flutter.dart';
 import 'package:syncache/syncache.dart';
@@ -71,20 +72,45 @@ class NoteApi {
 }
 
 /// Builds a fresh cache over the same Hive boxes the foreground uses.
-Future<Syncache<Note>> buildNoteCache() async {
+/// The [network] parameter is for the foreground instance only — the
+/// background isolate always constructs it without one (AlwaysOnline:
+/// a background task's whole job is to send while it can).
+Future<Syncache<Note>> buildNoteCache({Network? network}) async {
   await Hive.initFlutter();
   final store = await HiveStore.open<Note>(
     boxName: 'demo_notes',
     fromJson: Note.fromJson,
     toJson: (note) => note.toJson(),
   );
-  final outbox = await HiveMutationOutbox.open(boxName: 'demo_notes_outbox');
+  final outbox = await HiveMutationOutbox.open(
+    boxName: 'demo_notes_outbox',
+    // Without this, a corrupted record is skipped silently — in a
+    // background isolate nobody would ever know.
+    onError: (error) => debugPrint('[note-cache] outbox record error: $error'),
+  );
+  if (kDebugMode) {
+    final box = Hive.box<Map<dynamic, dynamic>>('demo_notes_outbox');
+    debugPrint('[note-cache] outbox box at "${box.path}" has '
+        '${box.length} entries');
+  }
   return Syncache<Note>(
     store: store,
     outbox: outbox,
-    // Recovery replays the exact pre-death optimistic value.
+    // Recovery replays the exact pre-death optimistic value. NOTE: Hive
+    // round-trips JSON maps as Map<dynamic, dynamic> — adapt before
+    // casting, or every replay fails here (silently, without observers).
     decodeOptimisticSnapshot: (snapshot) =>
-        Note.fromJson(snapshot! as Map<String, dynamic>),
+        Note.fromJson(Map<String, dynamic>.from(snapshot! as Map)),
+    network: network,
+    // Surface replay failures in the console — in a background isolate
+    // this is the only way to see them.
+    observers: [
+      LoggingObserver(
+        prefix: '[note-cache]',
+        log: debugPrint,
+        verbose: false,
+      ),
+    ],
   );
 }
 
@@ -117,7 +143,11 @@ void callbackDispatcher() {
   Workmanager().executeTask((task, inputData) async {
     if (!isSyncacheTask(task)) return true; // other packages' tasks
     debugPrint('[background] task "$task" starting');
-    return runSyncacheTask(task, flusher: buildNoteFlusher());
+    return runSyncacheTask(
+      task,
+      flusher: buildNoteFlusher(),
+      onReport: (report) => debugPrint('[background] $task → $report'),
+    );
   });
 }
 
@@ -174,7 +204,9 @@ class _BackgroundFlushDemoState extends State<BackgroundFlushDemo> {
   }
 
   Future<void> _openCache() async {
-    final cache = await buildNoteCache();
+    // The foreground cache honors the airplane-mode toggle; background
+    // tasks build their own AlwaysOnline cache via buildNoteCache().
+    final cache = await buildNoteCache(network: _network);
     _cache = cache;
 
     // Seed the document on first run so mutate() has a cached value.

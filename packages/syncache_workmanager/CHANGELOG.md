@@ -17,7 +17,8 @@
   a budget-exhaustion flag, and duration.
 - `runSyncacheTask` + `isSyncacheTask` + the canonical
   `syncacheFlushTaskName` / `syncacheCleanupTaskName` constants for wiring
-  a workmanager `callbackDispatcher`.
+  a workmanager `callbackDispatcher`, with `onReport` / `onError` hooks
+  for background logging.
 - `registerSyncachePeriodicFlush` / `registerSyncacheOneOffFlush`
   registration helpers defaulting to a network-connected constraint.
 - Unsent mutations always stay in the outbox: a background pass that runs
