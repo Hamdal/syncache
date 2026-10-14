@@ -37,6 +37,8 @@ void main() {
     _Target('packages/syncache_hive/README.md', 'syncache_hive', _hivePreamble),
     _Target(
         'packages/syncache_drift/README.md', 'syncache_drift', _driftPreamble),
+    _Target('packages/syncache_workmanager/README.md', 'syncache_workmanager',
+        _workmanagerPreamble),
   ];
 
   var totalBlocks = 0;
@@ -173,6 +175,9 @@ dependencies:
     path: $repoRoot/packages/syncache_hive
   syncache_drift:
     path: $repoRoot/packages/syncache_drift
+  syncache_workmanager:
+    path: $repoRoot/packages/syncache_workmanager
+  workmanager: ^0.10.0
   hive_ce: ^2.20.2
   hive_ce_flutter: ^2.4.0
 dependency_overrides:
@@ -329,4 +334,40 @@ late final Syncache<String> cache;
 late final Stored<User> entry;
 late final PendingMutationRecord record;
 var key = 'user:1';
+''';
+
+const String _workmanagerPreamble = '''
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:syncache/syncache.dart';
+import 'package:syncache_workmanager/syncache_workmanager.dart';
+import 'package:workmanager/workmanager.dart';
+
+$_sharedStubs
+
+late final Syncache<User> cache;
+var user = const User(id: 123, name: 'Old Name');
+
+Future<Syncache<User>> buildUserCache() async =>
+    Syncache<User>(store: MemoryStore<User>(), outbox: MemoryMutationOutbox());
+
+Future<Mutation<User>> resolveUserRecord(PendingMutationRecord record) async =>
+    Mutation<User>(apply: (u) => u, send: (u) async => u);
+
+Future<Syncache<List<Post>>> buildPostListCache() async =>
+    Syncache<List<Post>>(
+        store: MemoryStore<List<Post>>(), outbox: MemoryMutationOutbox());
+
+Future<Mutation<List<Post>>> resolvePostRecord(
+        PendingMutationRecord record) async =>
+    Mutation<List<Post>>(apply: (list) => list, send: (list) async => list);
+
+SyncacheBackgroundFlusher buildFlusher() => SyncacheBackgroundFlusher(
+      registrations: [
+        SyncacheBackgroundCacheRegistration<User>(
+          createCache: buildUserCache,
+          resolveRecord: resolveUserRecord,
+        ),
+      ],
+    );
 ''';
