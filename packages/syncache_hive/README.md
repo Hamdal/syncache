@@ -21,8 +21,8 @@ Add `syncache_hive` to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  syncache: ^0.5.0
-  syncache_hive: ^0.5.0
+  syncache: ^0.6.0
+  syncache_hive: ^0.6.0
   hive_ce: ^2.20.2
 ```
 

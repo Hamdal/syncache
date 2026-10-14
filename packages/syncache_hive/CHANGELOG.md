@@ -1,3 +1,11 @@
+## 0.6.0
+
+### Changed
+
+- `syncache` dependency constraint bumped to `^0.6.0` — released in
+  lockstep with the core package (shared `TaggableStore` /
+  `MutationOutbox` interfaces). No API changes in this package.
+
 ## 0.5.0
 
 ### Changed

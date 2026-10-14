@@ -32,7 +32,7 @@ An offline-first cache and sync engine for Dart and Flutter applications.
 
 ```yaml
 dependencies:
-  syncache: ^0.5.0
+  syncache: ^0.6.0
 ```
 
 ```dart
@@ -54,8 +54,8 @@ userEntry.watch().listen((user) => print('updated: ${user.name}'));
 
 ```yaml
 dependencies:
-  syncache: ^0.5.0
-  syncache_flutter: ^0.5.0
+  syncache: ^0.6.0
+  syncache_flutter: ^0.6.0
 ```
 
 ```dart
@@ -81,8 +81,8 @@ CacheBuilder<User>(
 
 ```yaml
 dependencies:
-  syncache: ^0.5.0
-  syncache_hive: ^0.5.0
+  syncache: ^0.6.0
+  syncache_hive: ^0.6.0
   hive_ce: ^2.20.2
 ```
 

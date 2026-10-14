@@ -25,8 +25,8 @@ Add `syncache_drift` to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  syncache: ^0.5.0
-  syncache_drift: ^0.5.0
+  syncache: ^0.6.0
+  syncache_drift: ^0.6.0
 ```
 
 For Flutter apps, also add the SQLite binaries:

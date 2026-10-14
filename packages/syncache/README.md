@@ -8,7 +8,7 @@ Syncache provides a unified API for caching data with multiple strategies, react
 
 ```yaml
 dependencies:
-  syncache: ^0.5.0
+  syncache: ^0.6.0
 ```
 
 ## Quick Start

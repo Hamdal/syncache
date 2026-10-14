@@ -28,9 +28,9 @@ The flush engine is plain Dart with injected dependencies; the workmanager-speci
 
 ```yaml
 dependencies:
-  syncache: ^0.5.0
+  syncache: ^0.6.0
   syncache_workmanager: ^0.1.0
-  syncache_hive: ^0.5.0 # or syncache_drift — a durable outbox is required
+  syncache_hive: ^0.6.0 # or syncache_drift — a durable outbox is required
   workmanager: ^0.10.0
 ```
 
