@@ -12,6 +12,8 @@ library syncache;
 
 export 'src/cache_result.dart' show CacheResult, CacheResultMeta;
 export 'src/cancellation.dart' show CancellationToken, CancelledException;
+export 'src/conflict_resolver.dart'
+    show ConflictResolver, serverWins, clientWins;
 export 'src/fetch_engine.dart' show CacheMissForConditionalException;
 export 'src/fetcher.dart'
     show Fetcher, SyncacheRequest, FetchResult, ConditionalFetcher;
@@ -26,6 +28,7 @@ export 'src/mutation_handle.dart'
         MutationHandle,
         MutationOutcome,
         MutationSuccess,
+        MutationResolved,
         MutationFailure,
         MutationDiscarded;
 export 'src/network.dart' show Network, ReactiveNetwork, AlwaysOnline;
@@ -52,7 +55,8 @@ export 'src/debug.dart' show SyncacheDebug;
 export 'src/store.dart' show Store, TaggableStore, BoundedStore, IterableStore;
 export 'src/stored.dart' show Stored;
 export 'src/syncache.dart' show Syncache;
-export 'src/exceptions.dart' show SyncacheException, CacheMissException;
+export 'src/exceptions.dart'
+    show SyncacheException, CacheMissException, SyncacheConflictException;
 export 'src/list_operation.dart'
     show
         ListOperation,

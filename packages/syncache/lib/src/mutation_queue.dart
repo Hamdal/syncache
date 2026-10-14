@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'conflict_resolver.dart';
+import 'exceptions.dart';
 import 'metadata.dart';
 import 'mutation.dart';
 import 'mutation_handle.dart';
@@ -43,6 +45,11 @@ class PendingMutation<T> {
   Object? lastError;
   PendingMutationStatus status;
 
+  /// Per-call conflict resolution override (from `mutate(conflictResolver:)`).
+  /// Takes precedence over the cache-wide default on
+  /// [MutationQueue.conflictResolver]. Null when neither was configured.
+  final ConflictResolver<T>? conflictResolver;
+
   /// Whether this mutation was explicitly discarded from the queue
   /// ([MutationQueue.clear], [MutationQueue.removeById], retry exhaustion).
   ///
@@ -66,6 +73,7 @@ class PendingMutation<T> {
     this.invalidateTags,
     this.payload,
     this.optimisticSnapshot,
+    this.conflictResolver,
     this.seq = 0,
     String? id,
   })  : id = id ?? 'mut_${++_mutationIdCounter}',
@@ -129,6 +137,13 @@ class MutationQueue<T> {
   final MutationRetryConfig retryConfig;
   final MutationOutbox? outbox;
 
+  /// Cache-wide default for conflict resolution. Consulted when a
+  /// mutation's send throws [SyncacheConflictException] and the mutation
+  /// has no per-call [PendingMutation.conflictResolver]. Null when the
+  /// cache was constructed without one — conflicts then fail terminally
+  /// instead of being retried.
+  final ConflictResolver<T>? conflictResolver;
+
   /// Decodes a persisted [PendingMutationRecord.optimisticSnapshot] back
   /// into a `T`. Null when the cache has no codec configured.
   final T Function(Object? snapshot)? decodeOptimisticSnapshot;
@@ -151,6 +166,7 @@ class MutationQueue<T> {
     required this.performInvalidations,
     this.outbox,
     this.decodeOptimisticSnapshot,
+    this.conflictResolver,
   });
 
   int get count => _pendingMutations.length;
@@ -438,66 +454,30 @@ class MutationQueue<T> {
         final serverValue =
             await pending.mutation.send(pending.optimisticValue);
 
-        var currentValue = serverValue;
-
-        // Re-apply pending mutations for the same key to preserve optimistic
-        // updates from mutations that were added while this one was in flight.
-        final pendingSnapshot = _pendingMutations.toList();
-        for (final pendingMutation in pendingSnapshot) {
-          if (pendingMutation.key == pending.key &&
-              pendingMutation != pending) {
-            currentValue = pendingMutation.mutation.apply(currentValue);
-            pendingMutation.optimisticValue = currentValue;
-          }
-        }
-
-        final cached = await store.read(pending.key);
-        final meta = Metadata(
-          version: (cached?.meta.version ?? 0) + 1,
-          storedAt: DateTime.now(),
-          ttl: cached?.meta.ttl,
-          etag: cached?.meta.etag,
-          lastModified: cached?.meta.lastModified,
+        await _settleConfirmed(
+          pending,
+          serverValue,
+          MutationSuccess(serverValue),
+          (key) => notifyObservers((o) => o.onMutationSuccess(key)),
         );
-
-        await store.write(pending.key, Stored(value: currentValue, meta: meta));
-        notifyObservers((o) => o.onStore(pending.key));
-        notifyObservers((o) => o.onMutationSuccess(pending.key));
-        await notifyWatchers(pending.key);
-        await performInvalidations(pending.invalidates, pending.invalidateTags);
-
-        // Remove by identity: if this mutation was removed from the queue
-        // while in flight, removing the first element would drop an
-        // unrelated mutation instead.
-        _pendingMutations.remove(pending);
-        if (outbox != null) {
-          unawaited(_deleteFromOutbox(pending.id));
-        }
-        pending.settle(MutationSuccess(serverValue));
-        _notifyChanged();
       } catch (e, st) {
         pending.lastError = e;
+
+        // A conflict is the server's verdict on a stale write, not a
+        // transient failure: retrying the same send would just conflict
+        // again. Resolve it (or fail terminally) — never plain-retry.
+        if (e is SyncacheConflictException<T>) {
+          await _handleConflict(pending, e, st);
+          continue;
+        }
+
         notifyObservers((o) => o.onMutationError(pending.key, e, st));
 
         final shouldRetry = retryConfig.shouldRetry(e) &&
             pending.retryCount < retryConfig.maxAttempts;
 
         if (!shouldRetry) {
-          pending.status = PendingMutationStatus.failed;
-          _notifyChanged();
-
-          _pendingMutations.remove(pending);
-          if (outbox != null) {
-            unawaited(_deleteFromOutbox(pending.id));
-          }
-          notifyObservers((o) => o.onMutationRetryExhausted(
-              pending.key, pending.retryCount + 1, e));
-          pending.settle(MutationFailure<T>(
-            error: e,
-            stackTrace: st,
-            retried: pending.retryCount,
-          ));
-          _notifyChanged();
+          _removeAndFail(pending, e, st);
           continue;
         }
 
@@ -520,5 +500,129 @@ class MutationQueue<T> {
     }
 
     _isProcessingQueue = false;
+  }
+
+  /// Writes the server-confirmed state for [pending] and settles its
+  /// handle. Mutations enqueued behind it for the same key are re-applied
+  /// on top of [confirmedValue] (their optimistic values updated too), the
+  /// composite value is stored, and watchers plus the mutation's
+  /// invalidations run. Finally the mutation is removed from the queue and
+  /// its outbox record deleted.
+  ///
+  /// [outcome] is the terminal handle settlement ([MutationSuccess] or
+  /// [MutationResolved]); [onConfirmed] fires the matching observer event
+  /// ([SyncacheObserver.onMutationSuccess] /
+  /// [SyncacheObserver.onMutationResolved]) after the store write and
+  /// before watchers are notified.
+  Future<void> _settleConfirmed(
+    PendingMutation<T> pending,
+    T confirmedValue,
+    MutationOutcome<T> outcome,
+    void Function(String key) onConfirmed,
+  ) async {
+    var currentValue = confirmedValue;
+
+    // Re-apply pending mutations for the same key to preserve optimistic
+    // updates from mutations that were added while this one was in flight.
+    final pendingSnapshot = _pendingMutations.toList();
+    for (final pendingMutation in pendingSnapshot) {
+      if (pendingMutation.key == pending.key && pendingMutation != pending) {
+        currentValue = pendingMutation.mutation.apply(currentValue);
+        pendingMutation.optimisticValue = currentValue;
+      }
+    }
+
+    final cached = await store.read(pending.key);
+    final meta = Metadata(
+      version: (cached?.meta.version ?? 0) + 1,
+      storedAt: DateTime.now(),
+      ttl: cached?.meta.ttl,
+      etag: cached?.meta.etag,
+      lastModified: cached?.meta.lastModified,
+    );
+
+    await store.write(pending.key, Stored(value: currentValue, meta: meta));
+    notifyObservers((o) => o.onStore(pending.key));
+    onConfirmed(pending.key);
+    await notifyWatchers(pending.key);
+    await performInvalidations(pending.invalidates, pending.invalidateTags);
+
+    // Remove by identity: if this mutation was removed from the queue
+    // while in flight, removing the first element would drop an
+    // unrelated mutation instead.
+    _pendingMutations.remove(pending);
+    if (outbox != null) {
+      unawaited(_deleteFromOutbox(pending.id));
+    }
+    pending.settle(outcome);
+    _notifyChanged();
+  }
+
+  /// Settles [pending] as a terminal failure and removes it from the queue
+  /// and the outbox. Used for non-retryable send errors and for conflicts
+  /// that could not be resolved; in both cases the mutation is done — no
+  /// further attempts are made.
+  void _removeAndFail(PendingMutation<T> pending, Object e, StackTrace st) {
+    pending.status = PendingMutationStatus.failed;
+    _notifyChanged();
+
+    _pendingMutations.remove(pending);
+    if (outbox != null) {
+      unawaited(_deleteFromOutbox(pending.id));
+    }
+    notifyObservers((o) =>
+        o.onMutationRetryExhausted(pending.key, pending.retryCount + 1, e));
+    pending.settle(MutationFailure<T>(
+      error: e,
+      stackTrace: st,
+      retried: pending.retryCount,
+    ));
+    _notifyChanged();
+  }
+
+  /// Resolves a [SyncacheConflictException] thrown by [pending]'s send.
+  ///
+  /// Consults the per-call [PendingMutation.conflictResolver], falling back
+  /// to the cache-wide [MutationQueue.conflictResolver]. On success the
+  /// resolved value is written via [_settleConfirmed] and the handle
+  /// settles with a [MutationResolved] outcome — the mutation is removed
+  /// from the queue and its outbox record deleted (resolved, not retried).
+  ///
+  /// Without any resolver, or when the resolver throws, the mutation fails
+  /// terminally with a [MutationFailure]: retrying a conflict would just
+  /// conflict again.
+  Future<void> _handleConflict(
+    PendingMutation<T> pending,
+    SyncacheConflictException<T> conflict,
+    StackTrace st,
+  ) async {
+    notifyObservers((o) => o.onMutationConflict(pending.key, conflict));
+
+    final resolver = pending.conflictResolver ?? conflictResolver;
+    if (resolver == null) {
+      // Nothing to consult — a 409 would only conflict again, so fail
+      // terminally instead of retrying.
+      notifyObservers((o) => o.onMutationError(pending.key, conflict, st));
+      _removeAndFail(pending, conflict, st);
+      return;
+    }
+
+    try {
+      final resolvedValue = await resolver.resolve(
+        optimisticValue: pending.optimisticValue,
+        serverValue: conflict.serverValue,
+        payload: pending.payload,
+      );
+      await _settleConfirmed(
+        pending,
+        resolvedValue,
+        MutationResolved<T>(resolvedValue, wasConflict: true),
+        (key) => notifyObservers((o) => o.onMutationResolved(key)),
+      );
+    } catch (e, resolverSt) {
+      // A throwing resolver is terminal too: retrying would throw again.
+      notifyObservers((o) => o.onMutationError(pending.key, e, resolverSt));
+      _removeAndFail(pending, e, resolverSt);
+    }
   }
 }

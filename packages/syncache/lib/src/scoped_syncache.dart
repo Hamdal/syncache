@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'cache_result.dart';
 import 'cancellation.dart';
+import 'conflict_resolver.dart';
 import 'fetcher.dart';
 import 'mutation.dart';
 import 'mutation_handle.dart';
@@ -195,6 +196,7 @@ class ScopedSyncache<T> {
     List<String>? invalidateTags,
     Map<String, Object?>? payload,
     Object? optimisticSnapshot,
+    ConflictResolver<T>? conflictResolver,
   }) {
     final scopedInvalidates = invalidates?.map(_scopedKey).toList();
 
@@ -205,6 +207,7 @@ class ScopedSyncache<T> {
       invalidateTags: invalidateTags,
       payload: payload,
       optimisticSnapshot: optimisticSnapshot,
+      conflictResolver: conflictResolver,
     );
   }
 

@@ -100,6 +100,24 @@ abstract class SyncacheObserver {
   void onMutationRetryExhausted(
       String key, int totalAttempts, Object finalError) {}
 
+  /// Called when a mutation's [Mutation.send] threw a
+  /// [SyncacheConflictException] — the server reports the resource changed
+  /// concurrently.
+  ///
+  /// The [error] is the conflict exception itself; its `serverValue` is the
+  /// server's current state. Conflicts are never retried: the configured
+  /// [ConflictResolver] decides the outcome next. When it resolves, this is
+  /// followed by [onMutationResolved]; when it throws (or no resolver is
+  /// configured), the mutation fails without retry and this is followed by
+  /// [onMutationError] plus [onMutationRetryExhausted].
+  void onMutationConflict(String key, Object error) {}
+
+  /// Called after a [SyncacheConflictException] was resolved: the
+  /// [ConflictResolver]'s value has been written to the cache and the
+  /// mutation settled with a [MutationResolved] outcome — it is removed
+  /// from the queue and will not be retried.
+  void onMutationResolved(String key) {}
+
   /// Called when a value is stored in the cache.
   ///
   /// This happens after successful fetches and mutations.

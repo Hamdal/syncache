@@ -43,7 +43,11 @@ class Mutation<T> {
   /// value replaces the optimistic value in the cache, ensuring eventual
   /// consistency with the server.
   ///
-  /// If this function throws, the mutation remains queued for retry.
+  /// If this function throws, the mutation remains queued for retry. The
+  /// exception to that is [SyncacheConflictException] (typically thrown for
+  /// an HTTP 409): a conflict is never retried — the configured
+  /// [ConflictResolver] decides the final value instead and the mutation
+  /// settles with a [MutationResolved] outcome.
   final Future<T> Function(T value) send;
 
   /// Creates a [Mutation] with the given [apply] and [send] functions.

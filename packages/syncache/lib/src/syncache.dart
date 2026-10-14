@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:syncache/src/exceptions.dart';
 import 'cache_result.dart';
 import 'cancellation.dart';
+import 'conflict_resolver.dart';
 import 'fetch_engine.dart';
 import 'fetcher.dart';
 import 'metadata.dart';
@@ -127,6 +128,16 @@ class Syncache<T> {
   /// [dispose].
   final Duration? cleanupInterval;
 
+  /// Cache-wide default [ConflictResolver], consulted when a mutation's
+  /// `send` throws a [SyncacheConflictException] (typically HTTP 409) and
+  /// the call did not pass its own resolver via `mutate(conflictResolver:)`.
+  ///
+  /// Conflicts are never retried: the resolver decides the final value and
+  /// the mutation settles with a [MutationResolved] outcome. When this is
+  /// null and no per-call resolver is given, a conflict fails terminally
+  /// instead.
+  final ConflictResolver<T>? conflictResolver;
+
   /// Opportunistic cleanup frequency: run a sweep at most once every N
   /// writes, or `null` (the default) to disable opportunistic sweeping.
   ///
@@ -205,6 +216,12 @@ class Syncache<T> {
   /// Pass a store implementing [BoundedStore] (e.g. `MemoryStore(maxLength:)`)
   /// to bound memory: evictions surface as `SyncacheObserver.onEvict`.
   ///
+  /// Provide [conflictResolver] to decide the final value when a mutation's
+  /// `send` throws [SyncacheConflictException] (e.g. an HTTP 409): the
+  /// resolver's value is stored, the handle settles with [MutationResolved],
+  /// and the mutation is not retried. Individual `mutate` calls can override
+  /// it with their own resolver.
+  ///
   /// Example:
   /// ```dart
   /// final cache = Syncache<User>(
@@ -213,6 +230,7 @@ class Syncache<T> {
   ///   observers: [LoggingObserver()],   // Optional
   ///   defaultRetry: RetryConfig(maxAttempts: 3), // Optional
   ///   mutationRetry: MutationRetryConfig(maxAttempts: 5), // Optional
+  ///   conflictResolver: serverWins<User>(), // Optional
   ///   cleanupInterval: Duration(minutes: 10), // Optional
   /// );
   /// ```
@@ -226,6 +244,7 @@ class Syncache<T> {
     this.decodeOptimisticSnapshot,
     this.cleanupInterval,
     this.opportunisticCleanupEvery,
+    this.conflictResolver,
   })  : network = network ?? const AlwaysOnline(),
         observers = observers ?? const [],
         defaultRetry = defaultRetry ?? RetryConfig.none,
@@ -245,6 +264,7 @@ class Syncache<T> {
       performInvalidations: _performMutationInvalidations,
       outbox: outbox,
       decodeOptimisticSnapshot: decodeOptimisticSnapshot,
+      conflictResolver: conflictResolver,
     );
 
     // Wire eviction events from bounded stores into the observer path so
@@ -971,6 +991,17 @@ class Syncache<T> {
   /// final outcome = await handle.outcome;
   /// ```
   ///
+  /// If [conflictResolver] is provided, it handles this mutation only: when
+  /// `send` throws [SyncacheConflictException] (typically HTTP 409 with the
+  /// server's current state), the resolver decides the final value, the
+  /// cache is updated with it, and the handle settles with a
+  /// [MutationResolved] outcome — the mutation is never retried and its
+  /// outbox record is removed. Without a per-call resolver the cache-wide
+  /// `Syncache(conflictResolver:)` default applies; when neither exists the
+  /// conflict fails terminally (still without retrying). The per-call
+  /// resolver is not persisted with the payload — after a process restart
+  /// replayed mutations use the cache-wide default.
+  ///
   /// Throws [CacheMissException] if no cached value exists for [key].
   Future<MutationHandle<T>> mutate({
     required String key,
@@ -979,6 +1010,7 @@ class Syncache<T> {
     List<String>? invalidateTags,
     Map<String, Object?>? payload,
     Object? optimisticSnapshot,
+    ConflictResolver<T>? conflictResolver,
   }) async {
     _checkNotDisposed();
     if ((payload != null || optimisticSnapshot != null) && outbox == null) {
@@ -1020,6 +1052,7 @@ class Syncache<T> {
       invalidateTags: invalidateTags,
       payload: payload,
       optimisticSnapshot: optimisticSnapshot,
+      conflictResolver: conflictResolver,
     );
     await _mutationQueue.add(pending);
     return pending.handle;

@@ -14,6 +14,8 @@ import 'dart:async';
 /// switch (await handle.outcome) {
 ///   case MutationSuccess(:final serverValue):
 ///     print('Server confirmed: $serverValue');
+///   case MutationResolved(:final resolvedValue, :final wasConflict):
+///     print('A conflict was resolved to: $resolvedValue');
 ///   case MutationFailure(:final error, :final retried):
 ///     print('Gave up after $retried retries: $error');
 ///   case MutationDiscarded():
@@ -75,6 +77,40 @@ class MutationDiscarded<T> extends MutationOutcome<T> {
   String toString() => 'MutationDiscarded()';
 }
 
+/// The mutation hit a server-side conflict ([SyncacheConflictException]
+/// thrown from [Mutation.send]) and the configured [ConflictResolver]
+/// produced the final value.
+///
+/// The mutation is **not** retried and its outbox record is removed: the
+/// conflict is considered settled. [resolvedValue] is what the resolver
+/// returned — it (with any mutations queued behind it re-applied) is the
+/// value now in the cache.
+///
+/// ```dart
+/// switch (await handle.outcome) {
+///   case MutationResolved(:final resolvedValue):
+///     print('Merged; final value: $resolvedValue');
+///   case MutationSuccess():
+///     // ...
+/// }
+/// ```
+class MutationResolved<T> extends MutationOutcome<T> {
+  /// The value produced by the [ConflictResolver] for this mutation.
+  final T resolvedValue;
+
+  /// Whether this outcome originates from a conflict. Syncache only settles
+  /// [MutationResolved] for resolved conflicts today, so this is always
+  /// `true`; the flag keeps outcome handling uniform for future resolution
+  /// paths.
+  final bool wasConflict;
+
+  const MutationResolved(this.resolvedValue, {this.wasConflict = true});
+
+  @override
+  String toString() =>
+      'MutationResolved($resolvedValue, wasConflict: $wasConflict)';
+}
+
 /// A handle for awaiting the server-side outcome of one specific mutation.
 ///
 /// Returned by [Syncache.mutate]. The optimistic update is applied before
@@ -103,7 +139,8 @@ class MutationHandle<T> {
   const MutationHandle.fromCompleter(this._completer);
 
   /// Resolves when the mutation reaches a terminal outcome:
-  /// [MutationSuccess], [MutationFailure], or [MutationDiscarded].
+  /// [MutationSuccess], [MutationResolved], [MutationFailure], or
+  /// [MutationDiscarded].
   ///
   /// The future never errors — failures are delivered as
   /// [MutationFailure] outcomes. It also never times out: a mutation that

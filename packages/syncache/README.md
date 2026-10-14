@@ -259,12 +259,102 @@ final handle = await cache.mutate(key: 'todo:1', mutation: mutation);
 switch (await handle.outcome) {
   case MutationSuccess(:final serverValue):
     // Server confirmed; the cache holds the server value.
+  case MutationResolved(:final resolvedValue):
+    // A conflict (HTTP 409) was resolved by the configured resolver;
+    // the cache holds the resolved value.
   case MutationFailure(:final error, :final retried):
     // Retries exhausted; the optimistic value remains cached.
   case MutationDiscarded():
     // Removed via clearPendingMutations / removePendingMutation / dispose.
 }
 ```
+
+### Conflict resolution
+
+By default a mutation's `send` always wins: failures are retried, and the
+server is expected to accept eventually. When a server instead rejects
+stale writes (version/etag preconditions, HTTP 409), throw a
+`SyncacheConflictException` from `send` with the server's current state.
+Syncache never retries a conflict — it consults a `ConflictResolver` and
+settles the mutation with what the resolver returns:
+
+```dart
+// The cache-wide default — every mutation uses it unless overridden.
+final cache = Syncache<User>(
+  store: store,
+  conflictResolver: serverWins<User>(), // or clientWins<User>()
+);
+```
+
+The resolver is where merge policies live. `ConflictResolver<T>` is an
+interface — implement it for any merge policy the built-ins can't express:
+
+```dart
+import 'package:syncache/syncache.dart';
+
+class Document {
+  final String title;
+  final String body;
+  const Document({required this.title, required this.body});
+
+  Document copyWith({String? title, String? body}) =>
+      Document(title: title ?? this.title, body: body ?? this.body);
+}
+
+class KeepServerTitle implements ConflictResolver<Document> {
+  @override
+  Future<Document> resolve({
+    required Document optimisticValue, // local unsynced intent
+    required Document serverValue, // server's current state
+    required Map<String, Object?>? payload,
+  }) async {
+    // Re-apply only our change on top of the fresh server value.
+    return serverValue.copyWith(title: optimisticValue.title);
+  }
+}
+```
+
+Inside `send`, surface the server's version/etag precondition and turn a
+409 into a typed conflict:
+
+```dart
+final handle = await cache.mutate(
+  key: 'user:123',
+  conflictResolver: clientWins<User>(), // per-call override
+  mutation: Mutation<User>(
+    apply: (user) => user.copyWith(name: 'New Name'),
+    send: (user) async {
+      final response = await api.updateUser(user);
+      if (user.name == 'CONFLICT') {
+        // Stand-in for `response.statusCode == 409`: hand the server's
+        // current state (parsed from the body) to the resolver.
+        throw SyncacheConflictException<User>(response);
+      }
+      return response;
+    },
+  ),
+);
+
+switch (await handle.outcome) {
+  case MutationResolved(:final resolvedValue, :final wasConflict):
+    print('Conflict settled; final value: $resolvedValue');
+  case MutationSuccess(:final serverValue):
+    print('Synced cleanly: $serverValue');
+  case MutationFailure(:final error):
+    print('Failed: $error');
+  case MutationDiscarded():
+    print('Removed before syncing');
+}
+```
+
+Conflicts fire `SyncacheObserver.onMutationConflict` when detected and
+`onMutationResolved` once the resolver's value is stored. Without any
+resolver configured, a conflict fails terminally instead of retrying —
+the optimistic value stays cached until the entry is refreshed.
+
+> Per-call resolvers are not persisted with the outbox payload: after a
+> process restart, replayed mutations resolve conflicts through the
+> cache-wide default.
 
 ### Tag-Based Invalidation
 

@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- **Conflict resolution.** Throw `SyncacheConflictException<T>(serverValue)`
+  from a mutation's `send` when the server rejects a stale write (typically
+  HTTP 409 with the server's current state in the body). Syncache never
+  retries a conflict: it consults a `ConflictResolver<T>` — passed per call
+  via `mutate(conflictResolver: ...)`, or configured cache-wide via
+  `Syncache(conflictResolver: ...)` — stores the resolved value (re-applying
+  mutations queued behind it), removes the outbox record, and settles the
+  handle with a new `MutationResolved<T>(resolvedValue, wasConflict)` outcome.
+  Built-in resolvers: `serverWins<T>()` and `clientWins<T>()`. New observer
+  events: `onMutationConflict(key, error)` and `onMutationResolved(key)`.
+
+### Changed
+
+- **BREAKING**: `MutationOutcome` gained the `MutationResolved` case, so
+  exhaustive `switch`es over outcomes must add it (sealed-class exhaustiveness
+  makes this a compile-time break for code that switches without a default).
+- Conflicts thrown without any configured `ConflictResolver` now fail the
+  mutation terminally instead of being retried (only affects code already
+  throwing `SyncacheConflictException`, which did not exist before this
+  release).
+
 ## 0.5.0
 
 ### Added
