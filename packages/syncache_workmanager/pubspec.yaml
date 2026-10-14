@@ -1,0 +1,37 @@
+name: syncache_workmanager
+description: >-
+  Background flush for Syncache outbox mutations. Wires workmanager's
+  periodic and one-off background tasks to the Syncache mutation outbox so
+  offline writes sync even when the app process has been killed.
+version: 0.1.0
+repository: https://github.com/Hamdal/syncache
+homepage: https://github.com/Hamdal/syncache
+issue_tracker: https://github.com/Hamdal/syncache/issues
+topics:
+  - cache
+  - offline-first
+  - background
+  - workmanager
+
+environment:
+  sdk: ^3.0.0
+  flutter: ">=3.10.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  syncache: ^0.5.0
+  workmanager: ^0.10.0
+
+# Local development: resolve the sibling package from this repository
+# instead of pub.dev. Committed (rather than using a pubspec_overrides.yaml)
+# so CI resolves the package without melos while `syncache` 0.6.0 is not yet
+# published. `pub publish` ignores dependency overrides.
+dependency_overrides:
+  syncache:
+    path: ../syncache
+
+dev_dependencies:
+  flutter_lints: ^3.0.0
+  flutter_test:
+    sdk: flutter

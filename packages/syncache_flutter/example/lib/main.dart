@@ -5,7 +5,13 @@ import 'package:flutter/material.dart';
 import 'package:syncache/syncache.dart';
 import 'package:syncache_flutter/syncache_flutter.dart';
 
-void main() {
+import 'background_flush_demo.dart';
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  // Schedules the periodic outbox flush (degrades gracefully on platforms
+  // without background-task support).
+  await initializeBackgroundFlush();
   runApp(const MyApp());
 }
 
@@ -129,6 +135,17 @@ class HomePage extends StatelessWidget {
                   cache: userCache,
                 ),
               ),
+            ),
+          ),
+          _buildSection(
+            context,
+            title: 'Background Flush (workmanager)',
+            description:
+                'Durable outbox replayed by OS background tasks — even '
+                'after the app process dies',
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const BackgroundFlushDemo()),
             ),
           ),
         ],

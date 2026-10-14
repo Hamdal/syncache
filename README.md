@@ -10,6 +10,7 @@ An offline-first cache and sync engine for Dart and Flutter applications.
 | [syncache_flutter](packages/syncache_flutter) | Flutter integration with widgets and lifecycle management | [![pub package](https://img.shields.io/pub/v/syncache_flutter.svg)](https://pub.dev/packages/syncache_flutter) |
 | [syncache_hive](packages/syncache_hive) | Persistent storage backend using Hive | [![pub package](https://img.shields.io/pub/v/syncache_hive.svg)](https://pub.dev/packages/syncache_hive) |
 | [syncache_drift](packages/syncache_drift) | Persistent storage backend using SQLite (Drift) | [![pub package](https://img.shields.io/pub/v/syncache_drift.svg)](https://pub.dev/packages/syncache_drift) |
+| [syncache_workmanager](packages/syncache_workmanager) | Background flush of outbox mutations via workmanager | [![pub package](https://img.shields.io/pub/v/syncache_workmanager.svg)](https://pub.dev/packages/syncache_workmanager) |
 
 ## Features
 
@@ -18,6 +19,7 @@ An offline-first cache and sync engine for Dart and Flutter applications.
 - **Reactive streams** - Subscribe to cache updates with `watch()`
 - **Optimistic mutations** - Update UI immediately while syncing in background
 - **Durable offline writes** - Queue mutations to an outbox and replay them after restarts
+- **Background flush** - Replay the outbox from OS background tasks with `syncache_workmanager`
 - **Tag-based invalidation** - Group and invalidate related cache entries
 - **Cache lifecycle** - LRU-bounded stores, expired-entry collection, health stats
 - **Debug tooling** - JSON state dumps (`SyncacheDebug`) and a Flutter inspector screen
@@ -120,12 +122,17 @@ Future<void> main() async {
 Prefer SQLite? [`syncache_drift`](packages/syncache_drift) offers the same
 `TaggableStore` interface plus a durable outbox over one shared database.
 
+App killed before the queue drains? [`syncache_workmanager`](packages/syncache_workmanager)
+replays the outbox from OS background tasks (workmanager), so offline writes
+sync even when the process is gone.
+
 ## Documentation
 
 - [syncache documentation](packages/syncache/README.md)
 - [syncache_flutter documentation](packages/syncache_flutter/README.md)
 - [syncache_hive documentation](packages/syncache_hive/README.md)
 - [syncache_drift documentation](packages/syncache_drift/README.md)
+- [syncache_workmanager documentation](packages/syncache_workmanager/README.md)
 
 ## Contributing
 

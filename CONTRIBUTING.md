@@ -11,6 +11,7 @@ layout, the development workflow, and the project's conventions.
 | `packages/syncache_flutter` | Flutter integration (widgets, lifecycle, connectivity) |
 | `packages/syncache_hive` | Hive (`hive_ce`) storage backend |
 | `packages/syncache_drift` | SQLite (Drift) storage backend |
+| `packages/syncache_workmanager` | Background flush of outbox mutations (workmanager) |
 | `docs/milestones/` | The implementation roadmap; each milestone is a self-contained brief |
 | `tool/` | Repo-level developer tooling |
 
