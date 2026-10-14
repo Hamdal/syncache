@@ -67,6 +67,10 @@ milestone) — see the release strategy section in
    explicit **BREAKING** section when applicable) and bump versions in
    lockstep across packages that share interfaces.
 5. Update READMEs/doc comments — see the code-sample convention below.
+6. Keep commit messages and PR titles/bodies about the change itself and
+   its public versioning. Internal planning notes (the local `docs/` tree,
+   milestones, workstream labels) never appear in git history or PR text —
+   they are deliberately untracked.
 
 ## Code-sample convention (READMEs and doc comments)
 
